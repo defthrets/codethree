@@ -1,0 +1,17 @@
+# The compiler and reference assemblies. ~174 MB, and there is already a copy on
+# this machine under the hoodrich project -- build.ps1 looks there.
+tools/
+
+# Build output.
+build/
+*.dll
+*.pdb
+
+# Release zips. The tags are the release history; the zips are just artefacts.
+release/*.zip
+
+# What the mod writes at runtime, if anybody ever builds in place.
+*.log
+*.log.1
+record.json
+record.json.bak
