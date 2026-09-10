@@ -24,13 +24,33 @@ namespace Flatline.Core
         public bool Announce = true;
 
         /// <summary>
-        /// The key that opens the settings screen. F9.
+        /// The key that opens the settings screen. Shift+H.
         ///
-        /// F9 BECAUSE EVERYTHING ELSE IS TAKEN, and that was checked rather than assumed. Across
-        /// the set: Hoodrich is on F2, Bare Minimum F7, Five0 Patrol F10, Overspray F11, Bloody
-        /// Mess Shift+B and Fumes Shift+F. F1, F3, F5 and F6 are claimed by other mods in the
-        /// scripts folder, and F4 is ScriptHookVDotNet's own console -- which is not a key any
-        /// mod gets to argue with.
+        /// THE FUNCTION ROW IS FULL, AND THIS SHIPPED ON F9 FIRST AND WAS WRONG.
+        ///
+        /// The first choice was made by scanning every ini in the scripts folder for a key
+        /// binding and taking one nothing had claimed. F9 came back clean. It was not clean --
+        /// it was reported as taken the moment somebody tried it. Nothing in that folder claims
+        /// F9 in a config file even now, so whatever owns it is either hardcoded inside another
+        /// mod's dll, an ASI that has no ini at all, or something outside the game entirely:
+        /// ShadowPlay, Afterburner, Steam and Discord all default to keys in this row.
+        ///
+        /// THE LESSON IS NOT "PICK A DIFFERENT F-KEY". A config scan cannot see any of those
+        /// three, so it cannot clear F7 or F8 either, and the row is otherwise gone: F1 is
+        /// FranklinRP, F2 Hoodrich, F3 Street Golf, F5 Vehicle Tweaks, F6 Weapon Tweaks, F10
+        /// Five0 Patrol, F11 and F12 Bare Minimum's menu and bag. F4 is ScriptHookVDotNet's own
+        /// console, which is not a key any mod gets to argue with.
+        ///
+        /// So this moves off the row altogether. A Shift chord is a far emptier space -- the
+        /// overlays that eat function keys do not bind Shift+letter -- and the set already lives
+        /// there: Bloody Mess is on Shift+B and Fumes on Shift+F.
+        ///
+        /// H BECAUSE NOTHING IN THE FOLDER CLAIMS IT, bare or chorded. That matters in the
+        /// direction people forget: a mod bound to a BARE key that does not check its modifiers
+        /// will also fire on Shift plus that key, so a chord is only safe when the letter under
+        /// it is free as well. The letters in use are E, F, I, J, K, L, M, N, O, U and Y; H is
+        /// not among them, and has no default GTA binding of its own. Five0 Patrol's own key
+        /// audit reached the same conclusion about H independently, for the same reasons.
         ///
         /// NOT P, and that matters even though this default is not P. P is GTA's own pause
         /// (control FrontendPauseAlternate) and SHVDN's key event does not consume the press --
@@ -38,17 +58,22 @@ namespace Flatline.Core
         /// pause screen on top of it. Options.Frame holds that control down for anybody who
         /// rebinds here, which is the only place it can be fixed from.
         /// </summary>
-        public Keys MenuKey = Keys.F9;
+        public Keys MenuKey = Keys.H;
 
         /// <summary>
         /// Shift, Control, Alt, or None for a bare key.
         ///
         /// COMPARED EXACTLY RATHER THAN TESTED FOR PRESENCE -- see Options.Chord. Treating this
-        /// as "is Shift among the modifiers" would make a Shift+F9 binding fire on Ctrl+Shift+F9
-        /// as well, and stealing another mod's chord is precisely what the audit above exists to
-        /// avoid.
+        /// as "is Shift among the modifiers" would make Shift+H fire on Ctrl+Shift+H and
+        /// Alt+Shift+H as well, and stealing another mod's chord is precisely what the audit
+        /// above exists to avoid.
+        ///
+        /// SHIFT IS SPRINT, and pressing it sends one frame of sprint to the game before the
+        /// panel is up and the controls go off. The same is true of the two chords already in
+        /// the set and nobody has ever noticed; standing still and tapping it does nothing at
+        /// all, because there is nothing to sprint towards.
         /// </summary>
-        public Keys MenuModifier = Keys.None;
+        public Keys MenuModifier = Keys.Shift;
 
         /// <summary>
         /// Turn off the game's own ambulance dispatch.

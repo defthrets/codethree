@@ -97,16 +97,27 @@ get a mod that argues with the game about what just happened to you.
 
 ## Settings
 
-**Press F9.** Every setting is on one screen: arrows to pick and change, F9 or Escape to close.
-Changes apply the instant you make them and are written back to `Flatline.ini` when you close —
-only the lines you actually touched, so the comments explaining what each one is *for* survive.
+**Press Shift+H.** Every setting is on one screen: arrows to pick and change, Shift+H or Escape
+to close. Changes apply the instant you make them and are written back to `Flatline.ini` when
+you close — only the lines you actually touched, so the comments explaining what each one is
+*for* survive.
 
-F9 because everything else is taken, and that was checked rather than assumed: Hoodrich is on
-F2, Bare Minimum F7, Five0 Patrol F10, Overspray F11, Bloody Mess Shift+B, Fumes Shift+F. F1,
-F3, F5 and F6 are claimed by other mods in the scripts folder, and F4 is ScriptHookVDotNet's
-own console. Rebind it in the ini if you need to — it is the one setting deliberately *not* on
-the menu, because a key you rebind from a screen you need that key to open is one wrong press
-from being unreachable.
+Not a function key, and that was learned rather than assumed. This shipped on F9, chosen by
+scanning every ini in the scripts folder for a binding nothing had claimed. F9 came back clean
+and was taken anyway — nothing in that folder claims it in a config file even now, so whatever
+owns it is hardcoded in another mod's DLL, an ASI with no ini, or something outside the game
+entirely. ShadowPlay, Afterburner, Steam and Discord all default to keys in that row.
+
+Which means a scan can't clear F7 or F8 either, and the rest of the row is gone: F1 FranklinRP,
+F2 Hoodrich, F3 Street Golf, F5 Vehicle Tweaks, F6 Weapon Tweaks, F10 Five0 Patrol, F11 and F12
+Bare Minimum. F4 is ScriptHookVDotNet's own console. So this sits with Bloody Mess (Shift+B) and
+Fumes (Shift+F) instead — and `H` is claimed by nothing in the folder, bare *or* chorded, which
+matters because a mod bound to a bare key that ignores modifiers will also fire on Shift plus
+that key.
+
+Rebind it in the ini if it still clashes — it is the one setting deliberately *not* on the menu,
+because a key you rebind from a screen you need that key to open is one wrong press from being
+unreachable.
 
 **The `[Fit]` rows are why the screen exists.** Everything else in this mod was verified before
 it shipped — the clips exist, the props exist, the damage hashes were computed and
