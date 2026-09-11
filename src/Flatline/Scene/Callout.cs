@@ -17,16 +17,16 @@ namespace Flatline.Scene
         /// <summary>Out of the van and walking to him.</summary>
         Reaching,
 
-        /// <summary>Kneeling, working on his chest.</summary>
+        /// <summary>The CPR, from the first knee down to the moment it did or did not take.</summary>
         Working,
 
-        /// <summary>The moment it did or did not take.</summary>
-        Verdict,
-
-        /// <summary>He is breathing. Getting him up and out of the road.</summary>
+        /// <summary>It took. Getting him to his feet.</summary>
         Rising,
 
-        /// <summary>He is not. Back to the van for the trolley.</summary>
+        /// <summary>It did not. Standing over him, writing it down.</summary>
+        Pronounce,
+
+        /// <summary>Back to the van for the trolley.</summary>
         Fetching,
 
         /// <summary>Trolley beside him, and him onto it.</summary>
@@ -40,6 +40,9 @@ namespace Flatline.Scene
 
         /// <summary>Driving. Either to the hospital, or away empty.</summary>
         Driving,
+
+        /// <summary>Somebody shot the patient. The crew back off and go.</summary>
+        Fleeing,
     }
 
     /// <summary>
@@ -48,28 +51,70 @@ namespace Flatline.Scene
     /// THIS IS THE MOD. Everything else in the project finds a body, decides what killed it, or
     /// keeps another mod out of the way; this is the part somebody watches.
     ///
+    /// THE PATIENT IS A PARTICIPANT, NOT A PROP. That is the whole difference between this and
+    /// the first version. A corpse is a ragdoll and cannot be animated, so 0.1.0 played half a
+    /// two-hander over a heap and hoped the compressions landed somewhere near a chest. Here he
+    /// is brought back into arrest the moment the crew reach him -- alive in the engine's eyes,
+    /// unconscious in everybody else's -- and from then on he is one of two people in a
+    /// synchronised scene, placed by the animation data rather than by us. The hands land on
+    /// the sternum because the game authored both halves of every clip around one origin.
+    ///
+    /// AND IT IS THE WHOLE SEQUENCE, NOT A LOOP. mini@cpr has seven clips and they are a story:
+    /// down to a knee, a look at him, the lean in, the compressions, sitting back, another look
+    /// -- and then either the one where he comes up or the one where the medic does. 0.1.0
+    /// played the compressions and the ending. This plays all of it, in the order it was
+    /// written, advanced by each clip finishing rather than by a stopwatch.
+    ///
     /// ONE AT A TIME, AND THAT IS NOT A LIMITATION. Two ambulances at one junction is a
     /// pile-up rather than a scene, and a second call refused is a second call that would have
-    /// arrived at an empty street anyway -- by the time the first finishes, whoever was standing
-    /// over the second body has walked off. Five0 Patrol's Medics reached the same conclusion,
-    /// in the same words, for the same reason.
+    /// arrived at an empty street anyway.
     ///
     /// EVERY STEP HAS A DEADLINE AND A WAY OUT. A crew that cannot reach a body on a rooftop, a
-    /// trolley that will not load, a van that cannot find the street -- none of those may leave
-    /// the scene stuck, because a stuck scene holds two persistent peds, a vehicle and a prop
-    /// for the rest of the session and refuses every later call. So each step is time-boxed and
-    /// every failure falls forward to Driving, which is the state that ends.
+    /// scene the engine will not start, a trolley that will not load -- none of those may leave
+    /// the call-out stuck, because a stuck call-out holds two persistent peds, a vehicle, a prop
+    /// and now a resurrected man for the rest of the session. So each step is time-boxed, every
+    /// failure falls forward to Driving, and Done() is the only exit -- called from the
+    /// deadlines, the distance check, the failure paths and the mod unloading.
     ///
-    /// AND THE WHOLE THING IS HANDED BACK. The van, the crew and the trolley are ours and are
-    /// marked persistent, which means the game will not clean them up. Done() is the only exit,
-    /// and it is called from the deadline, from the distance check, from the failure paths and
-    /// from the mod unloading.
+    /// AND HE GOES BACK THE WAY HE WAS FOUND. A man they could not save was dead when they
+    /// arrived and is dead when they leave: Done() kills him again if he is still ours, so no
+    /// other mod ever sees a corpse that stood up. A man they saved is handed to the city alive
+    /// with a limp, and from that moment is nobody's but the game's.
     /// </summary>
     internal sealed class Callout
     {
+        /// <summary>One clip in the sequence, and how long it gets.</summary>
+        private struct Beat
+        {
+            public string Clip;
+
+            /// <summary>Looped for Ms, or played once with Ms as the ceiling.</summary>
+            public bool Loop;
+            public int Ms;
+        }
+
+        /// <summary>A one-shot that has not reported finished by this is not going to.</summary>
+        private const int OneShotMs = 4500;
+
+        /// <summary>The first look at him, between kneeling and leaning in.</summary>
+        private const int FirstLookMs = 2400;
+
+        /// <summary>The look between rounds.</summary>
+        private const int BetweenMs = 1800;
+
+        /// <summary>And the last one, before the verdict.</summary>
+        private const int LastLookMs = 1100;
+
+        /// <summary>How long the crew back off for before they get back in.</summary>
+        private const int FleeMs = 2600;
+
+        /// <summary>Lights, siren, and through the traffic rather than round it.</summary>
+        private const int DriveStyle = 786603;
+
         private readonly Settings _cfg;
         private readonly Random _rng;
         private readonly Gurney _trolley;
+        private readonly Kit _kit;
 
         private Vehicle _van;
         private Ped _driver;
@@ -85,15 +130,11 @@ namespace Flatline.Scene
         /// <summary>
         /// Set by every change of step and consumed by the step that has just started.
         ///
-        /// THE OBVIOUS VERSION OF THIS IS A BUG AND IT WAS WRITTEN FIRST. Each of the steps
-        /// below has work that must happen once -- open the doors, bring the trolley out, lay
-        /// him on it -- and the tempting test is `now - _stepAt == 0`, on the reasoning that the
-        /// first pass through a step is the one where no time has elapsed. It is not. To() is
-        /// called at the END of the previous step, so by the time the new one gets a tick the
-        /// clock has already moved on, and at sixty frames a second it has moved sixteen
-        /// milliseconds. The entry work then never runs at all -- except on a machine fast
-        /// enough to fit two ticks in one millisecond, where it runs sometimes.
-        ///
+        /// THE OBVIOUS VERSION OF THIS IS A BUG AND IT WAS WRITTEN FIRST. Each step has work
+        /// that must happen once, and the tempting test is `now - _stepAt == 0`. It is not
+        /// true: To() is called at the END of the previous step, so by the time the new one
+        /// gets a tick the clock has moved on, and the entry work never runs at all -- except
+        /// on a machine fast enough to fit two ticks in one millisecond, where it runs sometimes.
         /// A flag has no such opinion about the clock.
         /// </summary>
         private bool _entering;
@@ -101,9 +142,33 @@ namespace Flatline.Scene
         private Verdict _verdict;
         private uint _weapon;
         private bool _carrying;
-
-        /// <summary>Whether the body has been put in the back rather than over a shoulder.</summary>
         private bool _bodyInVan;
+
+        /// <summary>The scene every paired clip is played against. Same origin for all of them.</summary>
+        private Sync _scene;
+
+        private Beat[] _beats;
+        private int _beat;
+        private int _beatAt;
+
+        /// <summary>When the last beat finished, so the verdict is held for exactly VerdictMs.</summary>
+        private int _verdictAt;
+
+        /// <summary>
+        /// Whether he is currently alive by our hand.
+        ///
+        /// TRUE FROM THE RESURRECTION UNTIL HE IS EITHER HANDED BACK ALIVE OR KILLED AGAIN. It
+        /// is the flag Done() reads to decide whether there is a man who needs putting back the
+        /// way he was found, and it is the only thing standing between "the player drove off
+        /// during the CPR" and "a resurrected stranger stands frozen in the road forever".
+        /// </summary>
+        private bool _ours;
+
+        /// <summary>Whether he is holding the lying-dead pose, which is what the trolley wants.</summary>
+        private bool _posed;
+
+        /// <summary>Whether the second man got his scenario, or is faking it with a clip.</summary>
+        private bool _mateBusy;
 
         /// <summary>Said out loud once per scene, if the player is near enough to care.</summary>
         public Action<string> Say;
@@ -113,6 +178,7 @@ namespace Flatline.Scene
             _cfg = cfg;
             _rng = rng;
             _trolley = new Gurney(cfg);
+            _kit = new Kit();
         }
 
         /// <summary>Whether a call-out is running at all.</summary>
@@ -132,8 +198,7 @@ namespace Flatline.Scene
         ///
         /// WHAT THE POLICE WAIT ON. Five0 Patrol keeps its officers at a body until the
         /// ambulance has gone, and it asks this to find out. It goes false the moment the van
-        /// pulls away rather than when it despawns, because that is the moment somebody
-        /// watching would call it over.
+        /// pulls away rather than when it despawns.
         /// </summary>
         public bool Still(Vector3 where)
         {
@@ -141,11 +206,15 @@ namespace Flatline.Scene
                    _at.DistanceTo(where) < _cfg.SameScene;
         }
 
+        /// <summary>Whether the man at this scene was one they could have had.</summary>
+        public bool Workable
+        {
+            get { return _step != Step.None && _verdict == Verdict.Workable; }
+        }
+
         // ---- the call ----------------------------------------------------------
 
-        /// <summary>
-        /// Sends one. Whether it went.
-        /// </summary>
+        /// <summary>Sends one. Whether it went.</summary>
         public bool Send(Death death)
         {
             if (Out) return false;
@@ -188,21 +257,28 @@ namespace Flatline.Scene
                 _body = death.Body;
                 _at = where;
 
+                // HELD FROM HERE. The engine tidies corpses away on its own schedule, and a
+                // van that takes a minute to arrive was, before, arriving at nothing about one
+                // time in five -- the log said "the body had gone" and nobody could say why.
+                // It is ours now, and Done() gives it back.
+                _body.IsPersistent = true;
+
                 // READ NOW, NOT AT THE SCENE. GET_PED_CAUSE_OF_DEATH is filled in when the ped
-                // dies and there is no promise about how long it stays useful -- and by the time
-                // the van arrives another mod may have searched, dragged or replaced the body.
-                // The verdict is a fact about the death, so it is taken at the death.
+                // dies and there is no promise about how long it stays useful -- and once he
+                // has been resurrected it is gone for good. The verdict is a fact about the
+                // death, so it is taken at the death.
                 _verdict = Cause.Read(_body, out _weapon);
 
-                // AND THE PLAYER MAY HAVE TURNED THE WHOLE IDEA OFF. Applied here rather than
-                // inside Cause, because Cause answers what killed him -- which is a fact -- and
-                // this is a decision about what the crew do with that answer.
                 if (!_cfg.Resuscitate) _verdict = Verdict.Gone;
 
                 _step = Step.Coming;
                 _stepAt = Game.GameTime;
+                _entering = true;
                 _carrying = false;
                 _bodyInVan = false;
+                _ours = false;
+                _posed = false;
+                _mateBusy = false;
 
                 Function.Call(Hash.TASK_VEHICLE_DRIVE_TO_COORD_LONGRANGE,
                               _driver.Handle, _van.Handle,
@@ -222,9 +298,6 @@ namespace Flatline.Scene
             }
         }
 
-        /// <summary>Lights, siren, and through the traffic rather than round it.</summary>
-        private const int DriveStyle = 786603;
-
         // ---- the tick ----------------------------------------------------------
 
         public void Update()
@@ -241,8 +314,8 @@ namespace Flatline.Scene
 
                 // GONE FROM THE WORLD RATHER THAN FROM THE SCENE. A call-out the player has
                 // driven three streets away from is not worth a tick, and holding a van, two
-                // crew and a trolley persistent out there is exactly the leak this set keeps
-                // finding in its own mods.
+                // crew, a trolley and a resurrected man persistent out there is exactly the leak
+                // this set keeps finding in its own mods.
                 if (me != null && me.Exists() &&
                     _van.Position.DistanceTo(me.Position) > _cfg.LetGoRange)
                 {
@@ -253,16 +326,17 @@ namespace Flatline.Scene
 
                 switch (_step)
                 {
-                    case Step.Coming:   Coming(now);   break;
-                    case Step.Reaching: Reaching(now); break;
-                    case Step.Working:  Working(now);  break;
-                    case Step.Verdict:  Verdicting(now); break;
-                    case Step.Rising:   Rising(now);   break;
-                    case Step.Fetching: Fetching(now); break;
-                    case Step.Loading:  Loading(now);  break;
-                    case Step.Wheeling: Wheeling(now); break;
-                    case Step.Stowing:  Stowing(now);  break;
-                    case Step.Driving:  Driving(now);  break;
+                    case Step.Coming:    Coming(now);    break;
+                    case Step.Reaching:  Reaching(now);  break;
+                    case Step.Working:   Working(now);   break;
+                    case Step.Rising:    Rising(now);    break;
+                    case Step.Pronounce: Pronounce(now); break;
+                    case Step.Fetching:  Fetching(now);  break;
+                    case Step.Loading:   Loading(now);   break;
+                    case Step.Wheeling:  Wheeling(now);  break;
+                    case Step.Stowing:   Stowing(now);   break;
+                    case Step.Driving:   Driving(now);   break;
+                    case Step.Fleeing:   Fleeing(now);   break;
                 }
             }
             catch (Exception ex)
@@ -279,12 +353,6 @@ namespace Flatline.Scene
             _entering = true;
         }
 
-        /// <summary>
-        /// True once per step, on the first tick that step is given.
-        ///
-        /// A step with no entry work of its own simply never asks, and the flag is set again by
-        /// the next change -- so an unconsumed one cannot leak into a later step.
-        /// </summary>
         private bool Entering()
         {
             if (!_entering) return false;
@@ -299,18 +367,22 @@ namespace Flatline.Scene
         {
             if (_van.Position.DistanceTo(_at) > _cfg.ThereRange)
             {
-                // Given up on. A van that cannot find the street is worse than no van.
                 if (now - _stepAt > _cfg.ComeMs) { Leave(now, "it could not get there"); }
                 return;
             }
 
-            // THE SIREN GOES OFF ON ARRIVAL AND THE LIGHTS STAY ON. Which is what they do: the
-            // noise is for the traffic on the way, and the lights are for the street it is
-            // parked in.
+            // THE SIREN GOES OFF ON ARRIVAL AND THE LIGHTS STAY ON. The noise is for the traffic
+            // on the way, and the lights are for the street it is parked in.
             Function.Call(Hash.SET_VEHICLE_SIREN, _van.Handle, false);
 
-            Out_(_driver);
-            Out_(_mate);
+            Out_(_driver, 1.4f);
+
+            // THE SECOND MAN BRINGS THE BAG, and goes to the other side of him. Two men
+            // walking to the same point from the same door arrive standing in each other, and
+            // the scene that follows puts one of them kneeling exactly where the other one was.
+            if (_cfg.MedicBag) _kit.Bring(_mate);
+
+            Out_(_mate, 2.2f, Flank());
 
             To(Step.Reaching, now);
 
@@ -319,8 +391,8 @@ namespace Flatline.Scene
             if (Say != null && Near()) Say("An ambulance pulls up.");
         }
 
-        /// <summary>One of them out and over to him.</summary>
-        private void Out_(Ped who)
+        /// <summary>One of them out and over to him, or to a spot near him.</summary>
+        private void Out_(Ped who, float stopAt, Vector3? spot = null)
         {
             if (!Crew.Alive(who)) return;
 
@@ -328,10 +400,19 @@ namespace Flatline.Scene
             {
                 Function.Call(Hash.TASK_LEAVE_VEHICLE, who.Handle, _van.Handle, 0);
 
+                if (spot.HasValue)
+                {
+                    var s = spot.Value;
+
+                    Function.Call(Hash.TASK_GO_STRAIGHT_TO_COORD, who.Handle,
+                                  s.X, s.Y, s.Z, 1.8f, _cfg.ReachMs, 0f, 0.4f);
+                    return;
+                }
+
                 if (Crew.There(_body))
                 {
                     Function.Call(Hash.TASK_GO_TO_ENTITY, who.Handle, _body.Handle,
-                                  _cfg.ReachMs, 1.2f, 2f, 1073741824f, 0);
+                                  _cfg.ReachMs, stopAt, 2f, 1073741824f, 0);
                     return;
                 }
 
@@ -344,13 +425,45 @@ namespace Flatline.Scene
             }
         }
 
+        /// <summary>
+        /// A spot beside the body, square to the way the van came in.
+        ///
+        /// The driver walks straight at him from the van, so "square to the van" is the side
+        /// the driver is not on. Falls back to the body itself when there is no van to measure
+        /// from, which only happens on the way to Done anyway.
+        /// </summary>
+        private Vector3 Flank()
+        {
+            try
+            {
+                if (!Crew.There(_body) || !Crew.Alive(_van)) return _at;
+
+                var body = _body.Position;
+                var toward = body - _van.Position;
+                toward.Z = 0f;
+
+                if (toward.Length() < 0.5f) return body;
+
+                toward = toward.Normalized;
+
+                // Perpendicular, on the ground.
+                var side = new Vector3(-toward.Y, toward.X, 0f);
+
+                return body + side * 1.7f;
+            }
+            catch
+            {
+                return _at;
+            }
+        }
+
         // ---- walking over ------------------------------------------------------
 
         private void Reaching(int now)
         {
             // THE BODY CAN GO AWAY MID-SCENE and it is not an error. Five0 Patrol drags corpses
-            // out of sight and the engine clears them on its own; either way there is nothing
-            // left to work on, and the crew get back in.
+            // out of sight and Hoodrich searches them; either way there is nothing left to work
+            // on, and the crew get back in.
             if (!Crew.There(_body)) { Leave(now, "the body had gone"); return; }
 
             var close = Crew.Alive(_driver) &&
@@ -361,52 +474,271 @@ namespace Flatline.Scene
             To(Step.Working, now);
         }
 
-        // ---- working on him ----------------------------------------------------
+        // ---- the scene ---------------------------------------------------------
 
         private void Working(int now)
         {
-            if (!Crew.There(_body)) { Leave(now, "the body had gone"); return; }
+            if (Entering())
+            {
+                if (!Arrest())
+                {
+                    // He would not come back into the engine's idea of alive. Nothing to be
+                    // done but what 0.1.0 did: call it, and load him as he lies.
+                    Log.Info("He could not be brought into arrest; treating him as gone.");
+                    _verdict = Verdict.Gone;
+                    To(Step.Pronounce, now);
+                    return;
+                }
 
-            // The mate stands off and watches. Two men doing compressions on one chest is
-            // worse than one doing it and one looking on.
-            Watch_(_mate);
+                Choreograph();
+                Mate_();
 
-            // SQUARED UP ONCE, ON THE WAY IN, AND BY HEADING RATHER THAN BY TASK.
-            //
-            // The first version of this asked TASK_TURN_PED_TO_FACE_ENTITY every pass, and the
-            // two lines fought each other every frame: turning is a task, playing a clip is a
-            // task, and each restarted the other -- so the medic stood over the body twitching
-            // and the compressions never got past their first frame. Setting the heading is not
-            // a task at all, so it cannot be in that argument.
-            if (Entering()) Square(_driver);
+                _beat = -1;
+                Advance(now);
+                return;
+            }
 
-            // THE CHEST COMPRESSIONS, RE-ASKED EVERY PASS. Anim.Play only restarts a clip that
-            // is not already running, so this holds the loop rather than stuttering it -- see
-            // the note in Anim.Play, which is the same lesson Five0 Patrol learned on its
-            // surrender pose.
-            Anim.Play(_driver, Anim.CprDict, Anim.CprPump, Anim.Loop);
+            // SHOT UNDER THEIR HANDS. He is alive during this, so the player can kill him
+            // again -- and if they do, the crew do what the scenario's own exit was authored
+            // for, which is to get away from whoever did it.
+            if (!Crew.Alive(_body)) { To(Step.Fleeing, now); return; }
 
-            var spent = now - _stepAt;
+            if (!_mateBusy) Look(_mate);
 
-            // HOW LONG THEY WORK IS NOT THE SAME EITHER WAY. A crew who arrive at somebody with
-            // a chance work until they get him back; a crew who arrive at somebody shot through
-            // the chest establish that fairly quickly and stop. Making both take the same
-            // twenty-six seconds is what made the vanilla scene read as a formality.
-            var need = _verdict == Verdict.Workable ? _cfg.WorkMs : _cfg.CheckMs;
+            // Past the last beat: the verdict is on screen, held. Give it its moment.
+            if (_beat >= _beats.Length)
+            {
+                if (now - _verdictAt < _cfg.VerdictMs) return;
 
-            if (spent < need) return;
+                if (_verdict == Verdict.Workable) To(Step.Rising, now);
+                else To(Step.Pronounce, now);
 
-            To(Step.Verdict, now);
+                return;
+            }
+
+            if (!BeatDone(now)) return;
+
+            Advance(now);
         }
 
-        /// <summary>The second one, stood back, looking at what is happening.</summary>
-        private void Watch_(Ped who)
+        /// <summary>
+        /// Brought back, into arrest.
+        ///
+        /// RESURRECT_PED LEAVES A PED BLANK -- Hoodrich's lesson, in Hoodrich's words: no flags,
+        /// out of whatever group it was in, none of what made it a person in a street. Here
+        /// that is a feature. What goes back on is exactly the set that makes him a patient:
+        /// nothing can target him, nothing he sees can move him, he cannot fall over, and he
+        /// has just enough health that being knocked by a passing car will not end the scene.
+        ///
+        /// THE SCENE ORIGIN IS TAKEN HERE, ON THE GROUND UNDER HIM. A ragdoll's position is
+        /// somewhere in its pelvis, which on a kerb is a hand's width above the road, and a
+        /// scene rooted there plays a hand's width above the road. GetGroundHeight is asked
+        /// from a little way up so it finds the road and not the inside of him.
+        /// </summary>
+        private bool Arrest()
         {
-            if (!Crew.Alive(who)) return;
+            if (!Crew.There(_body)) return false;
 
             try
             {
-                if (!Crew.There(_body)) return;
+                var h = _body.Handle;
+                var where = _body.Position;
+                var heading = _body.Heading;
+
+                float ground;
+                if (World.GetGroundHeight(where + new Vector3(0f, 0f, 1f), out ground,
+                                          GetGroundHeightMode.Normal) &&
+                    Math.Abs(ground - where.Z) < 3f)
+                {
+                    where.Z = ground;
+                }
+
+                Function.Call(Hash.RESURRECT_PED, h);
+
+                if (!Crew.Alive(_body)) return false;
+
+                Function.Call(Hash.CLEAR_PED_TASKS_IMMEDIATELY, h);
+
+                var max = Function.Call<int>(Hash.GET_PED_MAX_HEALTH, h);
+                if (max <= 0) max = 200;
+
+                Function.Call(Hash.SET_ENTITY_HEALTH, h, Math.Max(30, max / 5));
+
+                Function.Call(Hash.SET_PED_CAN_RAGDOLL, h, false);
+                Function.Call(Hash.SET_BLOCKING_OF_NON_TEMPORARY_EVENTS, h, true);
+                Function.Call(Hash.SET_PED_CAN_BE_TARGETTED, h, false);
+                Function.Call(Hash.SET_PED_FLEE_ATTRIBUTES, h, 0, false);
+
+                _ours = true;
+                _posed = false;
+
+                _scene = new Sync(where, heading);
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not bring him into arrest: " + ex.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// The order of the clips, and how long each one gets.
+        ///
+        /// TWO ROUNDS FOR A MAN WITH A CHANCE, ONE FOR A MAN WITHOUT. That is what makes the two
+        /// outcomes read differently before either ending has played: a crew that keeps going
+        /// back to his chest is a crew that thinks there is something there. The compressions
+        /// take the ini's WorkMs and CheckMs -- the numbers that already existed -- split across
+        /// the rounds, so nobody's tuning is thrown away.
+        /// </summary>
+        private void Choreograph()
+        {
+            if (_verdict == Verdict.Workable)
+            {
+                var half = Math.Max(1500, _cfg.WorkMs / 2);
+
+                _beats = new[]
+                {
+                    Once(Anim.Kneel),
+                    Loop(Anim.KneelIdle, FirstLookMs),
+                    Once(Anim.KneelToCpr),
+                    Loop(Anim.Pump, half),
+                    Once(Anim.CprToKneel),
+                    Loop(Anim.KneelIdle, BetweenMs),
+                    Once(Anim.KneelToCpr),
+                    Loop(Anim.Pump, half),
+                    Once(Anim.CprToKneel),
+                    Loop(Anim.KneelIdle, LastLookMs),
+                    Once(Anim.Worked),
+                };
+
+                return;
+            }
+
+            _beats = new[]
+            {
+                Once(Anim.Kneel),
+                Loop(Anim.KneelIdle, FirstLookMs),
+                Once(Anim.KneelToCpr),
+                Loop(Anim.Pump, Math.Max(1500, _cfg.CheckMs)),
+                Once(Anim.CprToKneel),
+                Loop(Anim.KneelIdle, BetweenMs),
+                Once(Anim.Failed),
+            };
+        }
+
+        private static Beat Once(string clip)
+        {
+            return new Beat { Clip = clip, Loop = false, Ms = OneShotMs };
+        }
+
+        private static Beat Loop(string clip, int ms)
+        {
+            return new Beat { Clip = clip, Loop = true, Ms = ms };
+        }
+
+        /// <summary>
+        /// The next clip, on both of them, against a fresh scene at the same origin.
+        ///
+        /// THE LAST BEAT IS HELD. cpr_success leaves him sat up and cpr_fail leaves the medic
+        /// sat back; both are the picture the verdict is judged from, and a scene that snapped
+        /// to idle the frame it ended would throw that picture away before anybody saw it.
+        /// </summary>
+        private void Advance(int now)
+        {
+            _beat++;
+            _beatAt = now;
+
+            if (_beat >= _beats.Length)
+            {
+                _verdictAt = now;
+                return;
+            }
+
+            var beat = _beats[_beat];
+            var last = _beat == _beats.Length - 1;
+
+            _scene.End();
+
+            if (!_scene.Begin(beat.Loop, last))
+            {
+                Log.Debug("The scene would not start for " + beat.Clip + ".");
+                return;
+            }
+
+            var a = _scene.Cast(_driver, Anim.CprMedic, beat.Clip);
+            var b = _scene.Cast(_body, Anim.CprVictim, beat.Clip);
+
+            if (!a || !b) Log.Debug("Could not cast both into " + beat.Clip + ".");
+        }
+
+        /// <summary>
+        /// Whether the current beat has run its course.
+        ///
+        /// A LOOP IS DONE WHEN ITS TIME IS UP. A one-shot is done when the scene says so -- with
+        /// two guards, because the scene's own answer is not to be trusted on the first frame or
+        /// the last. It takes a tick for the task to register, during which the scene reports
+        /// "not running", which Sync reads as finished; so nothing under two hundred
+        /// milliseconds counts. And a scene that never started at all reports the same thing
+        /// forever; so anything not running after a second is taken as over, and anything at
+        /// all is taken as over at the ceiling.
+        /// </summary>
+        private bool BeatDone(int now)
+        {
+            var beat = _beats[_beat];
+            var age = now - _beatAt;
+
+            if (beat.Loop) return age >= beat.Ms;
+
+            if (age < 200) return false;
+
+            var phase = _scene.Phase;
+
+            if (phase >= 0.985f) return true;
+            if (phase < 0f && age > 1000) return true;
+
+            return age > beat.Ms;
+        }
+
+        /// <summary>
+        /// The second man: bag down beside him, then kneeling, tending, on the far side.
+        ///
+        /// THE GAME'S OWN SCENARIO RATHER THAN A CLIP. It runs enter, a base loop and idle
+        /// variations of its own accord, which is a man who is doing something rather than a
+        /// man holding a pose -- and it is the exact thing the vanilla paramedics play at a
+        /// body, so it is the texture this mod is meant to be finishing rather than replacing.
+        /// </summary>
+        private void Mate_()
+        {
+            if (!Crew.Alive(_mate) || !Crew.There(_body)) return;
+
+            try
+            {
+                if (_kit.There) _kit.SetDown(Flank() + (_at - Flank()).Normalized * 0.9f);
+
+                var at = _body.Position - _mate.Position;
+                if (at.Length() > 0.2f)
+                {
+                    _mate.Heading = (float)(Math.Atan2(at.Y, at.X) * 180d / Math.PI) - 90f;
+                }
+
+                _mateBusy = Anim.Scenario(_mate, Anim.TendScenario);
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("The second man could not settle: " + ex.Message);
+                _mateBusy = false;
+            }
+        }
+
+        /// <summary>The fallback for a man with nothing to do: kneel and look.</summary>
+        private void Look(Ped who)
+        {
+            if (!Crew.Alive(who) || !Crew.There(_body)) return;
+
+            try
+            {
                 if (who.Position.DistanceTo(_body.Position) > 4f) return;
 
                 Anim.Play(who, Anim.LookDict, Anim.LookClip, Anim.Loop);
@@ -417,119 +749,179 @@ namespace Flatline.Scene
             }
         }
 
-        /// <summary>
-        /// Squared up to the body, so the compressions land on a chest.
-        ///
-        /// SET_ENTITY_HEADING rather than a turn task -- see the call site. It is instant and
-        /// slightly abrupt, and that is the correct trade: a man dropping to his knees beside a
-        /// body has already turned on the way down, and nobody is watching his feet.
-        /// </summary>
-        private void Square(Ped who)
-        {
-            if (!Crew.Alive(who) || !Crew.There(_body)) return;
+        // ---- he comes round ----------------------------------------------------
 
-            try
-            {
-                var at = _body.Position - who.Position;
-
-                if (at.Length() < 0.2f) return;
-
-                who.Heading = (float)(Math.Atan2(at.Y, at.X) * 180d / Math.PI) - 90f;
-            }
-            catch
-            {
-                // Cosmetic.
-            }
-        }
-
-        // ---- and whether it took -----------------------------------------------
-
-        private void Verdicting(int now)
+        private void Rising(int now)
         {
             if (Entering())
             {
-                Anim.Stop(_driver, Anim.CprDict, Anim.CprPump);
+                _scene.End();
 
-                Anim.Play(_driver, Anim.CprDict,
-                          _verdict == Verdict.Workable ? Anim.CprWorked : Anim.CprFailed,
-                          Anim.HoldLast);
+                var paired = _scene.Begin(false, false) &&
+                             _scene.Cast(_driver, Anim.Rescue, Anim.RescueMedic) &&
+                             _scene.Cast(_body, Anim.Rescue, Anim.RescueVictim);
+
+                if (!paired)
+                {
+                    // On his own, then. The medic simply stands.
+                    Log.Debug("The helping-up scene would not start; he gets up himself.");
+                    Function.Call(Hash.CLEAR_PED_TASKS, _driver.Handle);
+                    Anim.Play(_body, Anim.GetUpDict, Anim.GetUpClip, 0);
+                }
+
+                Log.Info("He came round -- it was " + Cause.Word(_weapon) + ".");
+
+                if (Say != null && Near()) Say("They bring him round.");
+                return;
             }
 
-            if (now - _stepAt < _cfg.VerdictMs) return;
+            if (!Crew.Alive(_body)) { To(Step.Fleeing, now); return; }
 
-            if (!Crew.There(_body)) { Leave(now, "the body had gone"); return; }
+            var age = now - _stepAt;
 
-            if (_verdict == Verdict.Workable) { Revive(now); return; }
+            if (age < 300) return;
 
-            if (Say != null && Near()) Say("They stop working on him.");
+            var phase = _scene.Phase;
+            var done = phase >= 0.985f || (phase < 0f && age > 1200) || age > _cfg.RisingMs;
 
-            // NOT EVERYBODY WANTS THE REST OF IT. With the hospital run switched off the crew
-            // do the one thing this mod was written to stop them doing -- get back in and leave
-            // him there -- and that is a legitimate way to run it: the resuscitation alone is
-            // most of the value, and the loading is the part that touches other mods' corpses.
+            if (!done) return;
+
+            LetGo();
+            Leave(now, null);
+        }
+
+        /// <summary>
+        /// Handed to the city, alive and limping.
+        ///
+        /// EVERYTHING ARREST TOOK OFF HIM GOES BACK ON, then he is nobody's. Holding a man you
+        /// have just saved so you can watch him walk away is how a mod ends up owning forty
+        /// people; he is marked no longer needed and the engine can have him back the moment
+        /// he is out of sight.
+        ///
+        /// NOT BACK TO FULL. A third of a bar is enough to walk off and it means a second beating
+        /// finishes him -- which is the honest consequence of having been dead a minute ago.
+        /// </summary>
+        private void LetGo()
+        {
+            try
+            {
+                var h = _body.Handle;
+
+                _scene.End();
+
+                Function.Call(Hash.CLEAR_PED_TASKS, h);
+
+                var max = Function.Call<int>(Hash.GET_PED_MAX_HEALTH, h);
+                if (max <= 0) max = 200;
+
+                Function.Call(Hash.SET_ENTITY_HEALTH, h, Math.Max(25, max / 3));
+                Function.Call(Hash.SET_PED_CAN_RAGDOLL, h, true);
+                Function.Call(Hash.SET_BLOCKING_OF_NON_TEMPORARY_EVENTS, h, false);
+                Function.Call(Hash.SET_PED_CAN_BE_TARGETTED, h, true);
+
+                if (_cfg.InjuredWalk)
+                {
+                    Anim.Clipset(_body, Crew.IsMale(_body) ? Anim.LimpMale : Anim.LimpFemale);
+                }
+
+                Function.Call(Hash.TASK_WANDER_STANDARD, h, 10f, 10);
+
+                _ours = false;
+
+                Crew.Give(_body);
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not let him go: " + ex.Message);
+            }
+
+            _body = null;
+
+            Unsettle(_mate);
+        }
+
+        // ---- he does not --------------------------------------------------------
+
+        private void Pronounce(int now)
+        {
+            if (Entering())
+            {
+                _scene.End();
+
+                // The medic stands. The second man writes it down, or just stands too.
+                Function.Call(Hash.CLEAR_PED_TASKS, _driver.Handle);
+
+                if (_cfg.TimeOfDeath) Anim.Scenario(_mate, Anim.TimeOfDeathScenario);
+                else Unsettle(_mate);
+
+                PoseDead();
+
+                if (Say != null && Near()) Say("They stop working on him.");
+                return;
+            }
+
+            if (now - _stepAt < _cfg.PronounceMs) return;
+
+            // NOT EVERYBODY WANTS THE REST OF IT. With the hospital run switched off the crew do
+            // the one thing this mod was written to stop them doing -- get back in and leave him
+            // there -- and that is a legitimate way to run it: the resuscitation is most of the
+            // value, and the loading is the part that touches other mods' corpses.
             if (!_cfg.TakeToHospital) { Leave(now, "they are not taking him"); return; }
+
+            Unsettle(_mate);
 
             To(Step.Fetching, now);
         }
 
         /// <summary>
-        /// He comes round.
+        /// Laid out flat, and kept that way.
         ///
-        /// RESURRECT_PED LEAVES A PED BLANK, which is Hoodrich's lesson and is written down
-        /// there in the same words: no flags, out of whatever group it was in, and none of the
-        /// things that made it a person in a street. So everything that matters is put back
-        /// afterwards, and it is put back in ONE place rather than two, because two lists of
-        /// flags drift apart and the copy that drifted is the one nobody tested.
-        ///
-        /// AND HE IS HANDED STRAIGHT BACK TO THE GAME. He is not ours -- he was a passer-by
-        /// before somebody hit him and he is a passer-by again. Holding him persistent so he
-        /// can be watched walking away is how a mod ends up with forty people it owns.
+        /// THIS IS WHAT MAKES THE TROLLEY WORK. He is alive, so he can be posed; the game ships
+        /// eight lying-dead clips; and a ped keeps playing its clip when it is attached to
+        /// something. So he holds dead_a, the trolley picks him up in that pose, and the
+        /// offsets in the ini are tuned against one shape that never varies -- instead of
+        /// against however each man happened to fall, which is what made them unverifiable.
         /// </summary>
-        private void Revive(int now)
+        private void PoseDead()
         {
-            try
-            {
-                var handle = _body.Handle;
+            if (!Crew.Alive(_body)) return;
 
-                Function.Call(Hash.RESURRECT_PED, handle);
-
-                var max = Function.Call<int>(Hash.GET_PED_MAX_HEALTH, handle);
-                if (max <= 0) max = 200;
-
-                // NOT BACK TO FULL. He has just been dead. A third of a bar is enough to stand
-                // up and get out of the road, and it means a second beating finishes him.
-                Function.Call(Hash.SET_ENTITY_HEALTH, handle, Math.Max(25, max / 3));
-
-                Function.Call(Hash.CLEAR_PED_TASKS_IMMEDIATELY, handle);
-                Function.Call(Hash.SET_PED_CAN_RAGDOLL, handle, true);
-                Function.Call(Hash.SET_BLOCKING_OF_NON_TEMPORARY_EVENTS, handle, false);
-                Function.Call(Hash.SET_PED_CAN_BE_TARGETTED, handle, true);
-
-                // Up, and away from the man who has been pushing on his chest.
-                Function.Call(Hash.TASK_WANDER_STANDARD, handle, 10f, 10);
-
-                Crew.Give(_body);
-
-                Log.Info("He came round -- it was " + Cause.Word(_weapon) + ".");
-
-                if (Say != null && Near()) Say("They bring him round.");
-            }
-            catch (Exception ex)
-            {
-                Log.Debug("Could not bring him round: " + ex.Message);
-            }
-
-            _body = null;
-
-            To(Step.Rising, now);
+            _posed = Anim.Play(_body, Anim.DeadDict, Anim.DeadPose, Anim.Hold);
         }
 
-        /// <summary>A moment for him to get up before the crew turn away.</summary>
-        private void Rising(int now)
+        /// <summary>Out of whatever scenario or clip he was in, and back on his feet.</summary>
+        private static void Unsettle(Ped who)
         {
-            if (now - _stepAt < _cfg.RisingMs) return;
+            if (!Crew.Alive(who)) return;
 
-            Leave(now, null);
+            try { Function.Call(Hash.CLEAR_PED_TASKS, who.Handle); }
+            catch { /* He stands there. */ }
+        }
+
+        // ---- shot under their hands --------------------------------------------
+
+        private void Fleeing(int now)
+        {
+            if (Entering())
+            {
+                _scene.End();
+
+                Log.Info("The patient was killed with the crew working on him.");
+
+                Anim.Play(_driver, Anim.FleeDict, Anim.FleeClip, 0);
+                Anim.Play(_mate, Anim.FleeDict, Anim.FleeClip, 0);
+
+                // He was ours a moment ago and is dead again now, by somebody else's hand. He is
+                // not ours any more and there is nothing to put back.
+                _ours = false;
+
+                if (Say != null && Near()) Say("The crew back off.");
+                return;
+            }
+
+            if (now - _stepAt < FleeMs) return;
+
+            Leave(now, "the patient was shot");
         }
 
         // ---- the trolley -------------------------------------------------------
@@ -540,24 +932,17 @@ namespace Flatline.Scene
 
             if (Entering())
             {
-                Anim.Stop(_driver, Anim.CprDict, Anim.CprFailed);
-                Anim.Stop(_mate, Anim.LookDict, Anim.LookClip);
-
                 Doors(true);
 
-                // THE TROLLEY IS BROUGHT OUT BESIDE THE BODY RATHER THAN WHEELED FROM THE VAN.
-                // Wheeling it over is prettier and is a second pathing problem in a street that
-                // already has a parked ambulance and two men in it; what it buys is a few
-                // seconds nobody is looking at, and what it costs is a prop stuck on a kerb.
-                //
+                // The bag goes back with him, if he brought one.
+                if (_kit.There) _kit.Bring(_mate);
+
                 // BESIDE HIM, NOT ON HIM. Put down at his exact position it spawns through him,
-                // which for the three seconds before he is loaded looks like a trolley that has
-                // been dropped on a corpse. A metre towards the van is where somebody wheeling
-                // it over would actually have stopped, and it puts the load and the walk back
-                // in the same direction.
+                // which for the three seconds before he is loaded looks like a trolley dropped
+                // on a corpse. A metre towards the van is where somebody wheeling it over would
+                // actually have stopped.
                 if (!_trolley.Bring(Beside(_body.Position), _body.Heading + 90f))
                 {
-                    // No gurney on this install. They carry him.
                     _carrying = true;
                 }
             }
@@ -579,7 +964,6 @@ namespace Flatline.Scene
 
             if (now - _stepAt < _cfg.LoadMs) return;
 
-            // Whoever is taking him back takes the trolley with him.
             if (!_carrying) _trolley.Take(_driver);
 
             Walk(_driver);
@@ -589,12 +973,36 @@ namespace Flatline.Scene
         }
 
         /// <summary>
-        /// A metre from the body, on the side the van is.
+        /// No trolley, so he goes over a shoulder.
         ///
-        /// Falls back to the body's own spot when the van is directly on top of it or gone,
-        /// because a normalised zero-length vector is a NaN and a prop spawned at NaN is a prop
-        /// that never appears and never says why.
+        /// The same weld the trolley uses, one entity closer. It is what happens on an install
+        /// that has neither gurney prop, so that the mod still ends with the body in the
+        /// ambulance rather than with the crew standing over him because a DLC was missing.
         /// </summary>
+        private void Carry()
+        {
+            OnShoulder();
+        }
+
+        private void OnShoulder()
+        {
+            if (!Crew.Alive(_driver) || !Crew.There(_body)) return;
+
+            try
+            {
+                Function.Call(Hash.ATTACH_ENTITY_TO_ENTITY,
+                              _body.Handle, _driver.Handle, 0,
+                              _cfg.CarryX, _cfg.CarryY, _cfg.CarryZ,
+                              0f, 0f, _cfg.CarryYaw,
+                              false, false, false, false, 2, true, 0);
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not pick him up: " + ex.Message);
+            }
+        }
+
+        /// <summary>A metre from the body, on the side the van is.</summary>
         private Vector3 Beside(Vector3 body)
         {
             try
@@ -612,49 +1020,6 @@ namespace Flatline.Scene
             {
                 return body;
             }
-        }
-
-        /// <summary>
-        /// No trolley, so he goes over a shoulder.
-        ///
-        /// The same weld the trolley uses, one entity closer. It is not as good and it is not
-        /// meant to be -- it is what happens on an install that has neither gurney prop, so
-        /// that the mod still ends with the body in the ambulance rather than with the crew
-        /// standing over him because a DLC was missing.
-        /// </summary>
-        private void Carry()
-        {
-            if (!Crew.Alive(_driver) || !Crew.There(_body)) return;
-
-            try
-            {
-                Function.Call(Hash.SET_PED_TO_RAGDOLL, _body.Handle, 1, 1, 0, false, false, false);
-                Function.Call(Hash.CLEAR_PED_TASKS_IMMEDIATELY, _body.Handle);
-
-                OnShoulder();
-            }
-            catch (Exception ex)
-            {
-                Log.Debug("Could not pick him up: " + ex.Message);
-            }
-        }
-
-        /// <summary>
-        /// The attach on its own, without the ragdoll and the task clear in front of it.
-        ///
-        /// SPLIT OUT FOR THE SETTINGS SCREEN. Re-fitting on every key press has to be cheap and
-        /// idempotent, and re-ragdolling a body forty times while somebody holds a slider down
-        /// is neither -- it fights the weld it is about to be put back into.
-        /// </summary>
-        private void OnShoulder()
-        {
-            if (!Crew.Alive(_driver) || !Crew.There(_body)) return;
-
-            Function.Call(Hash.ATTACH_ENTITY_TO_ENTITY,
-                          _body.Handle, _driver.Handle, 0,
-                          _cfg.CarryX, _cfg.CarryY, _cfg.CarryZ,
-                          0f, 0f, _cfg.CarryYaw,
-                          false, false, false, false, 2, true, 0);
         }
 
         /// <summary>Back to the van, at a walk. Nobody runs a trolley.</summary>
@@ -691,6 +1056,9 @@ namespace Flatline.Scene
             {
                 if (_carrying) InVan();
                 else if (!_trolley.Stow(_van)) InVan();
+
+                // The bag goes in the back with everything else.
+                _kit.Release();
 
                 Board(_driver, -1);
                 Board(_mate, 0);
@@ -742,7 +1110,6 @@ namespace Flatline.Scene
             }
         }
 
-        /// <summary>The attach on its own. Split out for the settings screen, as OnShoulder is.</summary>
         private void InBack()
         {
             if (!Crew.There(_body) || !Crew.Alive(_van)) return;
@@ -752,75 +1119,6 @@ namespace Flatline.Scene
                           _cfg.BodyInVanX, _cfg.BodyInVanY, _cfg.BodyInVanZ,
                           0f, 0f, _cfg.BodyInVanYaw,
                           false, false, false, false, 2, true, 0);
-        }
-
-        /// <summary>
-        /// Put everything back where the offsets NOW say it goes.
-        ///
-        /// THE POINT OF THE [FIT] SLIDERS. Those numbers are the one part of this mod that could
-        /// not be measured -- a prop's origin is wherever the artist put it and there is no way
-        /// to find that out from outside the running game -- so they are tuned by looking at a
-        /// body on a trolley and moving it until it sits right. That is only possible if moving
-        /// the number moves the body on the same frame; a value that took effect on the NEXT
-        /// call-out would be the alt-tab-edit-restart loop again with extra steps.
-        /// </summary>
-        public void Refit()
-        {
-            if (_step == Step.None) return;
-
-            try
-            {
-                _trolley.Refit();
-
-                if (!_carrying) return;
-
-                if (_bodyInVan) InBack();
-                else OnShoulder();
-            }
-            catch (Exception ex)
-            {
-                Log.Debug("Could not re-fit the scene: " + ex.Message);
-            }
-        }
-
-        /// <summary>
-        /// What the crew are doing, in three or four words, for the settings screen.
-        ///
-        /// ONLY EVER READ WHILE THE MENU IS OPEN. It exists because tuning the fit means waiting
-        /// for a call-out to reach the step you care about, and without a readout the only way
-        /// to know whether the trolley is out yet is to go and look at it -- which is awkward
-        /// when the menu has the controls disabled.
-        /// </summary>
-        public string State
-        {
-            get
-            {
-                switch (_step)
-                {
-                    case Step.None:     return "nothing on";
-                    case Step.Coming:   return "on the way";
-                    case Step.Reaching: return "walking over";
-                    case Step.Working:  return _verdict == Verdict.Workable
-                                             ? "working on him" : "checking him";
-                    case Step.Verdict:  return _verdict == Verdict.Workable
-                                             ? "they have him" : "nothing to be done";
-                    case Step.Rising:   return "he is getting up";
-                    case Step.Fetching: return "fetching the trolley";
-                    case Step.Loading:  return _carrying ? "picking him up" : "loading him";
-                    case Step.Wheeling: return _carrying ? "carrying him back" : "wheeling him back";
-                    case Step.Stowing:  return "into the back";
-                    case Step.Driving:  return _to == Vector3.Zero
-                                             ? "leaving" : "driving to the hospital";
-                }
-
-                return "?";
-            }
-        }
-
-        /// <summary>Whether the man at this scene was one they could have had.</summary>
-        public bool Workable
-        {
-            get { return _step != Step.None && _verdict == Verdict.Workable; }
         }
 
         private void Board(Ped who, int seat)
@@ -839,12 +1137,9 @@ namespace Flatline.Scene
         }
 
         /// <summary>
-        /// The back doors.
-        ///
-        /// THREE INDICES, BECAUSE THE AMBULANCE IS NOT A SALOON. Door 5 is the boot on most
-        /// models and the rear pair on some; 2 and 3 are the rear side doors where a model has
-        /// them. Asking for a door a model does not have is harmless, and asking for all three
-        /// is how this works on both editions without a table of per-model door layouts.
+        /// The back doors. Three indices, because the ambulance is not a saloon: 5 is the boot
+        /// on most models and the rear pair on some; 2 and 3 are the rear side doors where a
+        /// model has them. Asking for a door a model does not have is harmless.
         /// </summary>
         private void Doors(bool open)
         {
@@ -871,8 +1166,12 @@ namespace Flatline.Scene
         {
             if (why != null) Log.Info("The call-out ended: " + why + ".");
 
-            Anim.Stop(_driver, Anim.CprDict, Anim.CprPump);
-            Anim.Stop(_mate, Anim.LookDict, Anim.LookClip);
+            if (_scene != null) _scene.End();
+
+            _kit.Release();
+
+            Unsettle(_driver);
+            Unsettle(_mate);
 
             Board(_driver, -1);
             Board(_mate, 0);
@@ -884,17 +1183,12 @@ namespace Flatline.Scene
 
         private void Driving(int now)
         {
-            // A GRACE PERIOD BEFORE THE WHEELS TURN, so the crew are actually in it. A van that
-            // pulls away the instant the state changes leaves a paramedic stood in the road for
-            // the rest of the session -- which is Five0 Patrol's note on the same problem, and
-            // the same fix.
+            // A GRACE PERIOD BEFORE THE WHEELS TURN, so the crew are actually in it.
             if (now - _stepAt < _cfg.BoardMs) return;
 
-            // ONCE, NOT EVERY FRAME. The grace period above gates this, so the flag is still
-            // unconsumed when the wait ends and this is the first pass after it -- which is
-            // exactly the moment to give the order. Issuing a task every frame does not make it
-            // happen harder; it restarts it, and a driving task restarted forty times a second
-            // is a van that never gets out of first gear.
+            // ONCE, NOT EVERY FRAME. Issuing a driving task every frame does not make it happen
+            // harder; it restarts it, and a task restarted forty times a second is a van that
+            // never gets out of first gear.
             if (Entering() && _to == Vector3.Zero)
             {
                 try
@@ -908,10 +1202,6 @@ namespace Flatline.Scene
                 }
             }
 
-            // ARRIVED, or long enough that it does not matter. The hospital is a destination
-            // rather than a place anything happens: nothing is unloaded, because a body carried
-            // through a door the game does not open is a body walked into a wall. It gets there
-            // and it is handed back.
             if (_to != Vector3.Zero && _van.Position.DistanceTo(_to) < _cfg.ArrivedRange)
             {
                 Log.Info("The ambulance reached the hospital.");
@@ -938,25 +1228,101 @@ namespace Flatline.Scene
             }
         }
 
+        // ---- the settings screen -----------------------------------------------
+
+        /// <summary>
+        /// Put everything back where the offsets NOW say it goes. See Options.Refit.
+        /// </summary>
+        public void Refit()
+        {
+            if (_step == Step.None) return;
+
+            try
+            {
+                _trolley.Refit();
+
+                if (!_carrying) return;
+
+                if (_bodyInVan) InBack();
+                else OnShoulder();
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not re-fit the scene: " + ex.Message);
+            }
+        }
+
+        /// <summary>What the crew are doing, in three or four words, for the settings screen.</summary>
+        public string State
+        {
+            get
+            {
+                switch (_step)
+                {
+                    case Step.None:      return "nothing on";
+                    case Step.Coming:    return "on the way";
+                    case Step.Reaching:  return "walking over";
+                    case Step.Working:   return Working_();
+                    case Step.Rising:    return "getting him up";
+                    case Step.Pronounce: return "calling it";
+                    case Step.Fetching:  return "fetching the trolley";
+                    case Step.Loading:   return _carrying ? "picking him up" : "loading him";
+                    case Step.Wheeling:  return _carrying ? "carrying him back" : "wheeling him back";
+                    case Step.Stowing:   return "into the back";
+                    case Step.Driving:   return _to == Vector3.Zero
+                                              ? "leaving" : "driving to the hospital";
+                    case Step.Fleeing:   return "backing off";
+                }
+
+                return "?";
+            }
+        }
+
+        private string Working_()
+        {
+            if (_beats == null) return "at the body";
+            if (_beat >= _beats.Length) return _verdict == Verdict.Workable ? "they have him" : "nothing to be done";
+            if (_beat < 0) return "kneeling";
+
+            var clip = _beats[_beat].Clip;
+
+            if (clip == Anim.Pump) return "compressions";
+            if (clip == Anim.KneelIdle) return "checking him";
+            if (clip == Anim.Worked) return "they have him";
+            if (clip == Anim.Failed) return "nothing to be done";
+
+            return "working on him";
+        }
+
         // ---- handing it all back ------------------------------------------------
 
         /// <summary>
         /// Everything given back to the game.
         ///
-        /// THE TROLLEY GOES FIRST, and it takes the body off itself on the way out -- see
-        /// Gurney.Release. An entity attached to a deleted one keeps an attachment to something
-        /// that is not there, and what that looks like is a corpse hanging in mid-air over a
-        /// road until the session ends.
+        /// THE ORDER IS THE POINT. The trolley lets go of the body before it is deleted, or the
+        /// body keeps an attachment to nothing and hangs in the air. THEN the body is put back
+        /// the way it was found: a man still ours is a man we resurrected and never released,
+        /// and he goes back to dead -- so no other mod ever meets a corpse that stood up and
+        /// froze. Only after that is anything handed to the population manager.
         /// </summary>
         public void Done()
         {
+            if (_scene != null) _scene.End();
+
+            _kit.Release();
             _trolley.Release();
 
             try
             {
                 if (Crew.There(_body))
                 {
-                    Function.Call(Hash.DETACH_ENTITY, _body.Handle, true, true);
+                    if (Function.Call<bool>(Hash.IS_ENTITY_ATTACHED, _body.Handle))
+                    {
+                        Function.Call(Hash.DETACH_ENTITY, _body.Handle, true, true);
+                    }
+
+                    if (_ours && Crew.Alive(_body)) Kill(_body);
+
                     Crew.Give(_body);
                 }
             }
@@ -980,8 +1346,39 @@ namespace Flatline.Scene
 
             _step = Step.None;
             _stepAt = 0;
+            _beats = null;
+            _beat = 0;
             _carrying = false;
             _bodyInVan = false;
+            _ours = false;
+            _posed = false;
+            _mateBusy = false;
+            _scene = null;
+        }
+
+        /// <summary>
+        /// Dead again, as he was found.
+        ///
+        /// Everything Arrest put on him comes off first, so what is left is an ordinary corpse:
+        /// ragdolls, can be searched, can be dragged, bleeds. SET_ENTITY_HEALTH to nought is the
+        /// cleanest death the engine offers -- no weapon, no force, no reaction clip.
+        /// </summary>
+        private static void Kill(Ped who)
+        {
+            try
+            {
+                var h = who.Handle;
+
+                Function.Call(Hash.CLEAR_PED_TASKS_IMMEDIATELY, h);
+                Function.Call(Hash.SET_PED_CAN_RAGDOLL, h, true);
+                Function.Call(Hash.SET_BLOCKING_OF_NON_TEMPORARY_EVENTS, h, false);
+                Function.Call(Hash.SET_PED_CAN_BE_TARGETTED, h, true);
+                Function.Call(Hash.SET_ENTITY_HEALTH, h, 0);
+            }
+            catch
+            {
+                // Gone already.
+            }
         }
 
         /// <summary>
@@ -989,9 +1386,7 @@ namespace Flatline.Scene
         ///
         /// THE BLOCKED EVENTS ARE THE ONE THAT MATTERS. A ped left with
         /// SET_BLOCKING_OF_NON_TEMPORARY_EVENTS on cannot react to anything for the rest of the
-        /// session -- not gunfire, not a car coming at him, not the player. Handing him back
-        /// without clearing it leaves a man standing in a street who has stopped being able to
-        /// notice the world, and nothing on screen says why.
+        /// session, and nothing on screen says why.
         /// </summary>
         private static void Loose(Ped who)
         {
@@ -999,9 +1394,7 @@ namespace Flatline.Scene
             {
                 if (who == null || !who.Exists()) return;
 
-                Anim.Stop(who, Anim.CprDict, Anim.CprPump);
-                Anim.Stop(who, Anim.LookDict, Anim.LookClip);
-
+                Function.Call(Hash.CLEAR_PED_TASKS, who.Handle);
                 Function.Call(Hash.SET_BLOCKING_OF_NON_TEMPORARY_EVENTS, who.Handle, false);
                 Function.Call(Hash.SET_PED_CAN_BE_TARGETTED, who.Handle, true);
             }

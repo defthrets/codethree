@@ -140,8 +140,25 @@ namespace Flatline.Core
         ///
         /// WHICH OF THOSE TWO IS NOT A COIN TOSS. It is what actually killed him, read off the
         /// engine's own record of it -- see Core.Cause.
+        ///
+        /// 0.2.0 -- the scene, done properly.
+        ///
+        /// 0.1.0 used two of the seven CPR clips, on one man, over a ragdoll that could not be
+        /// animated because it was dead. It worked, in the sense that a paramedic knelt and
+        /// pushed at the air near a body. This version makes the body a participant: he is
+        /// brought back into arrest when they reach him, placed by a synchronised scene so the
+        /// hands land on his chest and the chest goes with them, and taken through the whole
+        /// sequence the game authored -- down to a knee, a look, the lean in, the compressions,
+        /// sitting back, another look, and either the moment it takes or the moment it does
+        /// not. Success ends with the medic pulling him to his feet and a limp he keeps. Failure
+        /// ends with the second man stood over him writing down the time, and a body that lies
+        /// flat on the trolley every time because it is posed rather than fallen.
+        ///
+        /// The second man carries the bag. The crew back off if the patient is shot under them.
+        /// And the corpse is held from the moment of dispatch, so the engine cannot tidy it
+        /// away before the van gets there -- which it could, before.
         /// </summary>
-        public const string Version = "0.1.0";
+        public const string Version = "0.2.0";
 
         /// <summary>The word on the splash row and at the top of the log.</summary>
         public const string Name = "Flatline";

@@ -115,6 +115,18 @@ namespace Flatline.Core
             }
         }
 
+        /// <summary>
+        /// The engine's own answer, for picking the right injured walk.
+        ///
+        /// IS_PED_MALE rather than a guess off the model name, for the reason Five0 Patrol's
+        /// Roster gives for the same call: it stays right if a model is ever swapped.
+        /// </summary>
+        public static bool IsMale(Ped who)
+        {
+            try { return !There(who) || Function.Call<bool>(Hash.IS_PED_MALE, who.Handle); }
+            catch { return true; }
+        }
+
         /// <summary>Hands a ped or a vehicle back to the game to clean up in its own time.</summary>
         public static void Give(Entity what)
         {

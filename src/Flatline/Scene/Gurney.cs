@@ -163,10 +163,11 @@ namespace Flatline.Scene
 
             try
             {
-                // Limp first, or the attach fights whatever ragdoll timer is still running.
-                Function.Call(Hash.SET_PED_TO_RAGDOLL, body.Handle, 1, 1, 0, false, false, false);
-                Function.Call(Hash.CLEAR_PED_TASKS_IMMEDIATELY, body.Handle);
-
+                // NOT RAGDOLLED FIRST ANY MORE. He arrives here alive and holding the lying-dead
+                // pose the call-out put him in -- see Callout.PoseDead -- and an attached ped
+                // keeps playing whatever clip it has, which is exactly what puts him flat on the
+                // canvas. Ragdolling him now would throw that pose away and put us back to
+                // welding a heap.
                 _load = body;
 
                 OnCanvas();

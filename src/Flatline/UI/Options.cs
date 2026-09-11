@@ -183,15 +183,27 @@ namespace Flatline.UI
                    "Crew", "TakeToHospital",
                    () => _cfg.TakeToHospital, v => _cfg.TakeToHospital = v);
 
+            Toggle("The second man brings the bag",
+                   "The red one from the back of every ambulance, carried over and set down beside him.",
+                   "Crew", "MedicBag", () => _cfg.MedicBag, v => _cfg.MedicBag = v);
+
+            Toggle("They write down the time",
+                   "When they lose him: the vanilla paramedic's own clipboard scenario before the trolley comes out.",
+                   "Crew", "TimeOfDeath", () => _cfg.TimeOfDeath, v => _cfg.TimeOfDeath = v);
+
+            Toggle("He limps away",
+                   "A man they bring round walks off injured, and keeps walking that way. Off, he strolls.",
+                   "Crew", "InjuredWalk", () => _cfg.InjuredWalk, v => _cfg.InjuredWalk = v);
+
             Head("HOW LONG IT TAKES");
 
-            Millis("Working on somebody with a chance",
-                   "The scene you actually watch. Longer than the check below, which is most of why it reads.",
+            Millis("Compressions, somebody with a chance",
+                   "Two rounds, split. The kneeling, looking and leaning are the clips' own length.",
                    "Timing", "WorkMs", 1000, 120000, 500,
                    () => _cfg.WorkMs, v => _cfg.WorkMs = v);
 
-            Millis("Establishing there is nothing to do",
-                   "Vanilla gives both cases the same twenty-six seconds, which is what makes it a formality.",
+            Millis("Compressions, somebody without one",
+                   "One round. Vanilla gives both cases the same twenty-six seconds, which is what makes it a formality.",
                    "Timing", "CheckMs", 1000, 120000, 500,
                    () => _cfg.CheckMs, v => _cfg.CheckMs = v);
 
@@ -200,9 +212,14 @@ namespace Flatline.UI
                    "Timing", "VerdictMs", 200, 30000, 100,
                    () => _cfg.VerdictMs, v => _cfg.VerdictMs = v);
 
-            Millis("Him getting up", "After he comes round, before the crew turn away.",
+            Millis("Helping him to his feet, at most",
+                   "A ceiling. The paired clip normally ends itself well inside this.",
                    "Timing", "RisingMs", 200, 30000, 100,
                    () => _cfg.RisingMs, v => _cfg.RisingMs = v);
+
+            Millis("On the clipboard", "Time of death, before anybody reaches for the trolley.",
+                   "Timing", "PronounceMs", 200, 30000, 100,
+                   () => _cfg.PronounceMs, v => _cfg.PronounceMs = v);
 
             Millis("Getting the trolley out", "The pause with the back doors open and nothing loaded yet.",
                    "Timing", "FetchMs", 200, 30000, 100,

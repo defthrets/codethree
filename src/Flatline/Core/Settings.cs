@@ -102,6 +102,26 @@ namespace Flatline.Core
         /// <summary>Whether the ones they lose are driven anywhere, or just left as before.</summary>
         public bool TakeToHospital = true;
 
+        /// <summary>The second man carries the bag over and sets it down beside him.</summary>
+        public bool MedicBag = true;
+
+        /// <summary>
+        /// When they lose him, the second man stands and writes it down.
+        ///
+        /// The vanilla paramedic's own time-of-death scenario, clipboard and all. It is the beat
+        /// that says the scene is over before anybody reaches for the trolley, and it is the
+        /// one most worth keeping if the rest is turned off.
+        /// </summary>
+        public bool TimeOfDeath = true;
+
+        /// <summary>
+        /// A man they bring round limps away rather than strolling.
+        ///
+        /// A movement clipset, so it is how he walks from then on -- he was beaten unconscious
+        /// a minute ago and a brisk walk off reads as the mod having lost interest in him.
+        /// </summary>
+        public bool InjuredWalk = true;
+
         // ---- how far anything reaches ------------------------------------------
 
         /// <summary>
@@ -163,8 +183,11 @@ namespace Flatline.Core
         /// <summary>The beat on the last frame of it, before anybody moves.</summary>
         public int VerdictMs = 2600;
 
-        /// <summary>How long he is given to get up and be out of the road.</summary>
-        public int RisingMs = 3500;
+        /// <summary>How long the getting-to-his-feet scene is given before he is let go regardless.</summary>
+        public int RisingMs = 6000;
+
+        /// <summary>How long the second man spends on the clipboard before the trolley comes out.</summary>
+        public int PronounceMs = 6000;
 
         /// <summary>Getting the trolley out and open beside him.</summary>
         public int FetchMs = 3200;
@@ -249,6 +272,9 @@ namespace Flatline.Core
 
                 s.Resuscitate = ini.GetBool("Crew", "Resuscitate", s.Resuscitate);
                 s.TakeToHospital = ini.GetBool("Crew", "TakeToHospital", s.TakeToHospital);
+                s.MedicBag = ini.GetBool("Crew", "MedicBag", s.MedicBag);
+                s.TimeOfDeath = ini.GetBool("Crew", "TimeOfDeath", s.TimeOfDeath);
+                s.InjuredWalk = ini.GetBool("Crew", "InjuredWalk", s.InjuredWalk);
 
                 s.NoticeRange = Clamp(ini.GetFloat("Range", "NoticeRange", s.NoticeRange), 10f, 200f);
                 s.ComeFrom = Clamp(ini.GetFloat("Range", "ComeFrom", s.ComeFrom), 30f, 400f);
@@ -267,6 +293,7 @@ namespace Flatline.Core
                 s.CheckMs = Whole(ini.GetInt("Timing", "CheckMs", s.CheckMs), 1000, 120000);
                 s.VerdictMs = Whole(ini.GetInt("Timing", "VerdictMs", s.VerdictMs), 200, 30000);
                 s.RisingMs = Whole(ini.GetInt("Timing", "RisingMs", s.RisingMs), 200, 30000);
+                s.PronounceMs = Whole(ini.GetInt("Timing", "PronounceMs", s.PronounceMs), 200, 30000);
                 s.FetchMs = Whole(ini.GetInt("Timing", "FetchMs", s.FetchMs), 200, 30000);
                 s.LoadMs = Whole(ini.GetInt("Timing", "LoadMs", s.LoadMs), 200, 30000);
                 s.WheelMs = Whole(ini.GetInt("Timing", "WheelMs", s.WheelMs), 2000, 60000);
