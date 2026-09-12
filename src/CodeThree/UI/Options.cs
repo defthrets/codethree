@@ -5,9 +5,9 @@ using System.Globalization;
 using System.Windows.Forms;
 using GTA;
 using GTA.Native;
-using Flatline.Core;
+using CodeThree.Core;
 
-namespace Flatline.UI
+namespace CodeThree.UI
 {
     /// <summary>
     /// One line in the menu: a heading, a switch, or something with a range.
@@ -51,7 +51,7 @@ namespace Flatline.UI
     /// AN INI IS NOT A SETTINGS SCREEN, and for this mod that is not a convenience argument --
     /// it is the difference between one section being tunable and not.
     ///
-    /// The [Fit] offsets are the one part of Flatline that could not be verified before it
+    /// The [Fit] offsets are the one part of Code Three that could not be verified before it
     /// shipped. Everything else was checked against the game's own dumps: the animation clips
     /// exist, the gurney props exist, the damage-cause hashes were computed and cross-checked.
     /// But a prop's origin is wherever the artist put it, and there is no way to measure one
@@ -156,7 +156,7 @@ namespace Flatline.UI
             Toggle("Mod enabled", "Everything off, without uninstalling anything.",
                    "General", "Enabled", () => _cfg.Enabled, v => _cfg.Enabled = v);
 
-            Pick("Logging", "Debug names every sweep, every verdict and every attach, in Flatline.log.",
+            Pick("Logging", "Debug names every sweep, every verdict and every attach, in CodeThree.log.",
                  "General", "Logging",
                  new[] { "Error", "Warn", "Info", "Debug" },
                  () => (int)_cfg.Logging,
@@ -785,7 +785,7 @@ namespace Flatline.UI
 
                 var y = top + Pad;
 
-                Screen.Text("FLATLINE", left + Pad, y - 0.006f, TitleScale,
+                Screen.Text("CODE THREE", left + Pad, y - 0.006f, TitleScale,
                             Palette.Alpha(Palette.Brand, a));
 
                 // WHAT THE CREW ARE DOING, WHERE THE VERSION WOULD OTHERWISE GO.

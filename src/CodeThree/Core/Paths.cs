@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 
-namespace Flatline.Core
+namespace CodeThree.Core
 {
     /// <summary>
     /// Where this mod reads and writes.
@@ -78,9 +78,9 @@ namespace Flatline.Core
             try
             {
                 if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return false;
-                if (File.Exists(Path.Combine(dir, "Flatline.ini"))) return true;
+                if (File.Exists(Path.Combine(dir, "CodeThree.ini"))) return true;
 
-                var data = Path.Combine(dir, "Flatline");
+                var data = Path.Combine(dir, "CodeThree");
                 return Directory.Exists(data) &&
                        File.Exists(Path.Combine(Path.Combine(data, "icons"), "seal-face.png"));
             }
@@ -116,7 +116,7 @@ namespace Flatline.Core
         {
             get
             {
-                var d = Path.Combine(Scripts, "Flatline");
+                var d = Path.Combine(Scripts, "CodeThree");
                 EnsureDir(d);
                 return d;
             }
@@ -137,12 +137,12 @@ namespace Flatline.Core
             {
                 if (_writable != null) return _writable;
 
-                var preferred = Path.Combine(Scripts, "Flatline");
+                var preferred = Path.Combine(Scripts, "CodeThree");
 
                 if (IsWritable(preferred)) { _writable = preferred; return _writable; }
 
                 var fallback = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Flatline");
+                    Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "CodeThree");
 
                 try
                 {
@@ -150,7 +150,7 @@ namespace Flatline.Core
                 }
                 catch
                 {
-                    fallback = Path.Combine(Path.GetTempPath(), "Flatline");
+                    fallback = Path.Combine(Path.GetTempPath(), "CodeThree");
                     try { if (!Directory.Exists(fallback)) Directory.CreateDirectory(fallback); }
                     catch { /* nothing left to try */ }
                 }
@@ -183,8 +183,8 @@ namespace Flatline.Core
             catch { /* the caller finds out when it writes */ }
         }
 
-        public static string Ini => Path.Combine(Scripts, "Flatline.ini");
-        public static string LogFile => Path.Combine(Writable, "Flatline.log");
+        public static string Ini => Path.Combine(Scripts, "CodeThree.ini");
+        public static string LogFile => Path.Combine(Writable, "CodeThree.log");
 
         /// <summary>The seal art, beside the data rather than loose in scripts\.</summary>
         public static string Icons => Path.Combine(Data, "icons");

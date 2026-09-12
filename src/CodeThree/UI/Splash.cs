@@ -2,7 +2,7 @@
 using System.Drawing;
 using GTA;
 
-namespace Flatline.UI
+namespace CodeThree.UI
 {
     /// <summary>
     /// One mark, and everything installed listed beside it, for a few seconds after load.

@@ -4,7 +4,7 @@ using System.Drawing;
 using System.IO;
 using GTA;
 
-namespace Flatline.UI
+namespace CodeThree.UI
 {
     /// <summary>
     /// The ratboy seal, drawn on screen with the katakana band turning.

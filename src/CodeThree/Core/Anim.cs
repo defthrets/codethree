@@ -2,7 +2,7 @@ using System;
 using GTA;
 using GTA.Native;
 
-namespace Flatline.Core
+namespace CodeThree.Core
 {
     /// <summary>
     /// Playing a clip on somebody, and never hanging the game to do it.

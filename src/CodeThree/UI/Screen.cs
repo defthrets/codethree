@@ -2,9 +2,9 @@ using System;
 using System.Drawing;
 using GTA;
 using GTA.Native;
-using Flatline.Core;
+using CodeThree.Core;
 
-namespace Flatline.UI
+namespace CodeThree.UI
 {
     /// <summary>
     /// The only place this mod writes anything on screen, and it is one line at a time.

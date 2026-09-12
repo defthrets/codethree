@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using GTA;
 using GTA.Math;
 using GTA.Native;
-using Flatline.Core;
+using CodeThree.Core;
 
-namespace Flatline.Scene
+namespace CodeThree.Scene
 {
     /// <summary>Somebody who has just died, and what is known about it.</summary>
     internal sealed class Death

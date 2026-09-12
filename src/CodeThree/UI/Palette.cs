@@ -1,9 +1,9 @@
 using System.Drawing;
 
-namespace Flatline.UI
+namespace CodeThree.UI
 {
     /// <summary>
-    /// Flatline's colours.
+    /// Code Three's colours.
     ///
     /// THE SAME SHAPE AS FIVE0 PATROL'S AND HOODRICH'S PALETTES, IN A DIFFERENT KEY. Each mod in
     /// the set is built on one brand pair -- a light end and a dark end of a single hue -- with

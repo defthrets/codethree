@@ -2,7 +2,7 @@ using System;
 using GTA;
 using GTA.Native;
 
-namespace Flatline.Core
+namespace CodeThree.Core
 {
     /// <summary>What the crew decide when they have had a proper look at him.</summary>
     internal enum Verdict

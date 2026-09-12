@@ -3,7 +3,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 
-namespace Flatline.Core
+namespace CodeThree.Core
 {
     internal enum LogLevel
     {
@@ -14,7 +14,7 @@ namespace Flatline.Core
     }
 
     /// <summary>
-    /// File logger for Flatline.log.
+    /// File logger for CodeThree.log.
     ///
     /// Every method swallows its own exceptions. A logger that can throw takes the whole
     /// script down from inside a Tick handler, which is precisely the moment the log is the
@@ -112,7 +112,7 @@ namespace Flatline.Core
     /// <summary>
     /// What this thing is called, in the one place anything is allowed to ask.
     ///
-    /// The file names are a separate matter: Flatline.dll, Flatline.ini, Flatline.log and the
+    /// The file names are a separate matter: CodeThree.dll, CodeThree.ini, CodeThree.log and the
     /// folder beside them are PATHS, and renaming a path breaks every installation that
     /// exists. This is the word people read.
     /// </summary>
@@ -161,7 +161,7 @@ namespace Flatline.Core
         public const string Version = "0.2.0";
 
         /// <summary>The word on the splash row and at the top of the log.</summary>
-        public const string Name = "Flatline";
+        public const string Name = "Code Three";
 
         public const string By = "spitmux";
     }

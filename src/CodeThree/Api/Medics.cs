@@ -1,11 +1,11 @@
 using System;
 
-namespace Flatline.Api
+namespace CodeThree.Api
 {
     /// <summary>
     /// What another mod is allowed to know about the ambulance.
     ///
-    /// ONE QUESTION, REALLY: is Flatline handling ambulances here, and is a crew still standing
+    /// ONE QUESTION, REALLY: is Code Three handling ambulances here, and is a crew still standing
     /// at that spot. It exists because Five0 Patrol already has an ambulance of its own -- an
     /// officer finds a body, calls it in, a van turns up, the crew kneel for twenty-six seconds
     /// and drive off leaving him in the road. That was the best thing available when it was
@@ -20,7 +20,7 @@ namespace Flatline.Api
     /// NOTHING THROWN LEAVES THIS FILE. An exception crossing a reflection call arrives at the
     /// other end as a TargetInvocationException wrapping a type the caller does not have.
     ///
-    /// IT IS SAFE BEFORE FLATLINE HAS STARTED. SHVDN builds scripts in whatever order it finds
+    /// IT IS SAFE BEFORE CODE THREE HAS STARTED. SHVDN builds scripts in whatever order it finds
     /// them, so the other mod can call in before Wire has run. Everything answers "no" until
     /// Ready, and the caller is expected to keep asking.
     /// </summary>
@@ -32,7 +32,7 @@ namespace Flatline.Api
         /// </summary>
         public static int ApiVersion => 1;
 
-        /// <summary>Flatline's own version string, for the other side's log.</summary>
+        /// <summary>Code Three's own version string, for the other side's log.</summary>
         public static string Version
         {
             get { try { return Core.Build.Version; } catch { return "?"; } }
@@ -61,7 +61,7 @@ namespace Flatline.Api
             _still = null;
         }
 
-        /// <summary>Whether Flatline is here AND has finished starting up.</summary>
+        /// <summary>Whether Code Three is here AND has finished starting up.</summary>
         public static bool Ready
         {
             get
@@ -75,7 +75,7 @@ namespace Flatline.Api
         /// Whether this mod is actually taking the ambulances.
         ///
         /// NOT THE SAME QUESTION AS Ready, and the difference is the whole reason another mod
-        /// asks. Flatline can be installed and switched off in its ini -- and a police mod that
+        /// asks. Code Three can be installed and switched off in its ini -- and a police mod that
         /// stood its own ambulance down merely because this assembly was PRESENT would leave a
         /// player with no ambulances at all, which is worse than the problem either mod set out
         /// to solve. Stand down for this, not for Ready.

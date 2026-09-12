@@ -2,9 +2,9 @@ using System;
 using GTA;
 using GTA.Math;
 using GTA.Native;
-using Flatline.Core;
+using CodeThree.Core;
 
-namespace Flatline.Scene
+namespace CodeThree.Scene
 {
     /// <summary>
     /// The trolley: fetched out of the back, laid out beside him, loaded, wheeled, and put away.

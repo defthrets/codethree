@@ -2,9 +2,9 @@ using System;
 using GTA;
 using GTA.Math;
 using GTA.Native;
-using Flatline.Core;
+using CodeThree.Core;
 
-namespace Flatline.Scene
+namespace CodeThree.Scene
 {
     /// <summary>Where a call-out has got to.</summary>
     internal enum Step

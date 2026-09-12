@@ -3,7 +3,7 @@ using GTA;
 using GTA.Math;
 using GTA.Native;
 
-namespace Flatline.Core
+namespace CodeThree.Core
 {
     /// <summary>
     /// A synchronised scene: two people placed by the animation rather than by us.

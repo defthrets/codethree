@@ -1,7 +1,7 @@
 using System;
 using System.Windows.Forms;
 
-namespace Flatline.Core
+namespace CodeThree.Core
 {
     /// <summary>
     /// Everything the player can change, and what it does when they have not.
@@ -258,7 +258,7 @@ namespace Flatline.Core
 
                 if (ini == null)
                 {
-                    Log.Warn("No Flatline.ini beside the dll; running on built-in defaults.");
+                    Log.Warn("No CodeThree.ini beside the dll; running on built-in defaults.");
                     return s;
                 }
 
@@ -326,7 +326,7 @@ namespace Flatline.Core
             }
             catch (Exception ex)
             {
-                Log.Error("Could not read Flatline.ini; running on built-in defaults.", ex);
+                Log.Error("Could not read CodeThree.ini; running on built-in defaults.", ex);
             }
 
             return s;

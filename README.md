@@ -1,4 +1,4 @@
-# Flatline
+# Code Three
 
 Paramedics who actually do something, for GTA V.
 
@@ -7,7 +7,7 @@ get out, they walk over, they stand there, they get back in, and they drive away
 is still lying in the road behind them. Whatever those crews were meant to be for, they are not
 for that, and the effect of watching it twice is that you stop looking at ambulances at all.
 
-Flatline is the rest of that call-out. They kneel and they work on him, and then one of two
+Code Three is the rest of that call-out. They kneel and they work on him, and then one of two
 things happens, decided by what actually killed him:
 
 - **A beating, a bat, a knife, a taser.** They get him back. He comes round sat on the road,
@@ -24,7 +24,7 @@ GTA V editions.
 
 ## What it does
 
-**Decides on the death, not on a dice roll.** [Cause.cs](src/Flatline/Core/Cause.cs) reads
+**Decides on the death, not on a dice roll.** [Cause.cs](src/CodeThree/Core/Cause.cs) reads
 `GET_PED_CAUSE_OF_DEATH`, which the engine fills in the moment a ped dies. Fists and melee
 weapons are workable; guns, vehicles, fire, explosions, drowning and falls are not. A mod that
 resuscitates a headshot and a fist fight at the same rate has not said anything — it has put an
@@ -36,7 +36,7 @@ he is brought back *into arrest* — alive in the engine's eyes, unconscious in 
 un-targetable, unable to fall — and from then on he is one of two people in a **synchronised
 scene**, placed by the animation data rather than by the mod. The hands land on his sternum and
 his chest goes with them, because the game authored both halves of every clip around one origin.
-See [Sync.cs](src/Flatline/Core/Sync.cs).
+See [Sync.cs](src/CodeThree/Core/Sync.cs).
 
 **Plays the whole sequence the game authored.** `mini@cpr` has seven clips in matched pairs and
 they are a story: down to a knee, a look at him, the lean in, the compressions, sitting back,
@@ -70,11 +70,11 @@ needs an RPF edit. This does not. On an install with neither prop, the crew carr
 **Backs off if you shoot the patient.** He is alive during the CPR, so you can kill him again.
 If you do, the crew play the scenario's own `exit_flee` and leave.
 
-**Finds the hospital by asking the map.** [Hospitals.cs](src/Flatline/Scene/Hospitals.cs)
+**Finds the hospital by asking the map.** [Hospitals.cs](src/CodeThree/Scene/Hospitals.cs)
 iterates the blips the game has already placed — sprite 61, `radar_hospital` — rather than
 carrying a table of coordinates that cannot know about a hospital added in a DLC.
 
-**Only answers deaths somebody saw.** [Watch.cs](src/Flatline/Scene/Watch.cs) watches the
+**Only answers deaths somebody saw.** [Watch.cs](src/CodeThree/Scene/Watch.cs) watches the
 *living*: a ped has to have been seen standing before its death counts. Sweeping for corpses
 instead would dispatch an ambulance to every body in a street where a gang fight finished ten
 minutes before you arrived. The body is held from the moment of dispatch, so the engine cannot
@@ -91,18 +91,18 @@ turns it back on when the mod unloads.
 in, a van turns up, the crew kneel for twenty-six seconds and leave him where he is. That is
 exactly what this mod replaces, so the two would otherwise put two vans at one junction.
 
-Flatline publishes [`Flatline.Api.Medics`](src/Flatline/Api/Medics.cs) and Five0 Patrol's
+Code Three publishes [`CodeThree.Api.Medics`](src/CodeThree/Api/Medics.cs) and Five0 Patrol's
 [`Core/Ambo.cs`](https://github.com/defthrets/five0patrol/blob/main/src/Five0Patrol/Core/Ambo.cs)
 reads it by reflection — the same late-bound pattern that mod already uses against
-`Hoodrich.Api.Block` and `Hoodrich.Api.Corpse`. When Flatline is installed **and switched on**,
+`Hoodrich.Api.Block` and `Hoodrich.Api.Corpse`. When Code Three is installed **and switched on**,
 Five0 Patrol stands its own ambulance down.
 
 The one beat worth keeping is kept: Five0 Patrol's officers wait at a body until the ambulance
-has left, and rather than losing that, `Ambo.Still()` asks Flatline the same question its own
+has left, and rather than losing that, `Ambo.Still()` asks Code Three the same question its own
 `Medics.At()` used to answer. The police behave exactly as they did.
 
-It fails open in both directions. Without Flatline, Five0 Patrol keeps its own ambulance and
-nothing changes. Without Five0 Patrol, Flatline neither knows nor cares.
+It fails open in both directions. Without Code Three, Five0 Patrol keeps its own ambulance and
+nothing changes. Without Five0 Patrol, Code Three neither knows nor cares.
 
 **One thing to know about the resurrection.** For the length of the scene — roughly half a
 minute, from the crew kneeling to the trolley going in the back — the patient is alive in the
@@ -111,14 +111,14 @@ Mess will stop pooling under him. Both resume the moment he is killed again on r
 window starts when the crew *reach* him, not when he dies, so the corpse is an ordinary corpse
 for the whole minute the van takes to arrive.
 
-`TakeToHospital` is the half of Flatline that *moves other people's corpses*. If another mod
+`TakeToHospital` is the half of Code Three that *moves other people's corpses*. If another mod
 wants a body where it fell, turn it off and keep the resuscitation, which is most of the value.
 
 ---
 
 ## The player
 
-Flatline does not touch your own death, deliberately. The vanilla Wasted flow and Hoodrich's
+Code Three does not touch your own death, deliberately. The vanilla Wasted flow and Hoodrich's
 hospital bill both already own that moment, and three systems answering one death is how you
 get a mod that argues with the game about what just happened to you.
 
@@ -127,7 +127,7 @@ get a mod that argues with the game about what just happened to you.
 ## Settings
 
 **Press Shift+H.** Every setting is on one screen: arrows to pick and change, Shift+H or Escape
-to close. Changes apply the instant you make them and are written back to `Flatline.ini` when
+to close. Changes apply the instant you make them and are written back to `CodeThree.ini` when
 you close — only the lines you actually touched, so the comments explaining what each one is
 *for* survive.
 
@@ -156,7 +156,7 @@ doing — *compressions*, *calling it*, *fetching the trolley* — because the m
 game's controls, so otherwise the only way to know whether the trolley is out yet is to close it
 and go and look.
 
-`Flatline.ini` is never overwritten by an update: a deploy adds options that are missing, with
+`CodeThree.ini` is never overwritten by an update: a deploy adds options that are missing, with
 their comments, and leaves everything you have changed alone. Deleting a line is safe; deleting
 the whole file is safe.
 

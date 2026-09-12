@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Builds Flatline and, optionally, drops it into GTA V.
+  Builds Code Three and, optionally, drops it into GTA V.
 
 .DESCRIPTION
   Uses the self-contained Roslyn compiler rather than `dotnet build`. The machine SDK is a
@@ -76,9 +76,9 @@ $refDir = Join-Path $Tools 'refasm\build\.NETFramework\v4.8'
 if (-not (Test-Path $csc))    { throw "Compiler missing: $csc" }
 if (-not (Test-Path $refDir)) { throw "net48 reference assemblies missing: $refDir" }
 
-$srcDir = Join-Path $root 'src\Flatline'
+$srcDir = Join-Path $root 'src\CodeThree'
 $outDir = Join-Path $root 'build'
-$outDll = Join-Path $outDir 'Flatline.dll'
+$outDll = Join-Path $outDir 'CodeThree.dll'
 
 # Either install serves as the reference source -- both ship the identical
 # ScriptHookVDotNet3.dll, so a pure SHVDN script is one build that runs on both.
@@ -175,10 +175,10 @@ function Deploy-To([string]$dir, [string]$label) {
     $scripts = Join-Path $dir 'scripts'
     New-Item -ItemType Directory -Force $scripts | Out-Null
 
-    Copy-Item $outDll (Join-Path $scripts 'Flatline.dll') -Force
+    Copy-Item $outDll (Join-Path $scripts 'CodeThree.dll') -Force
 
-    $iniSrc = Join-Path $root 'Flatline.ini'
-    $iniDst = Join-Path $scripts 'Flatline.ini'
+    $iniSrc = Join-Path $root 'CodeThree.ini'
+    $iniDst = Join-Path $scripts 'CodeThree.ini'
 
     if (Test-Path $iniSrc) {
         if (Test-Path $iniDst) {
@@ -222,7 +222,7 @@ function Deploy-To([string]$dir, [string]$label) {
             }
 
             if ($add.Count -eq 0) {
-                Write-Host "  keep   Flatline.ini" -ForegroundColor DarkGray
+                Write-Host "  keep   CodeThree.ini" -ForegroundColor DarkGray
             } else {
                 $added = 0
 
@@ -257,7 +257,7 @@ function Deploy-To([string]$dir, [string]$label) {
             }
         } else {
             Copy-Item $iniSrc $iniDst
-            Write-Host "  new    Flatline.ini" -ForegroundColor Green
+            Write-Host "  new    CodeThree.ini" -ForegroundColor Green
         }
     }
 
@@ -267,7 +267,7 @@ function Deploy-To([string]$dir, [string]$label) {
     # it differs -- nobody hand-edits one, and a stale mark is a bug that looks like a
     # rendering fault.
     $artSrc = Join-Path $root 'data\icons'
-    $artDst = Join-Path $scripts 'Flatline\icons'
+    $artDst = Join-Path $scripts 'CodeThree\icons'
 
     if (Test-Path $artSrc) {
         New-Item -ItemType Directory -Force $artDst | Out-Null
@@ -315,32 +315,32 @@ if ($Deploy) {
 # folder in the wrong place. So this builds the tree explicitly and then CHECKS it, because a
 # packaging script that quietly ships four files instead of five is a support thread.
 if ($Package) {
-    $ver = (Select-String -Path (Join-Path $root 'src\Flatline\Core\Log.cs') `
+    $ver = (Select-String -Path (Join-Path $root 'src\CodeThree\Core\Log.cs') `
                           -Pattern 'Version = "([^"]+)"').Matches[0].Groups[1].Value
 
     $stage = Join-Path $root 'build\pkg'
-    $zip = Join-Path $root ("release\Flatline-" + $ver + ".zip")
+    $zip = Join-Path $root ("release\CodeThree-" + $ver + ".zip")
 
     if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
-    New-Item -ItemType Directory -Force (Join-Path $stage 'scripts\Flatline\icons') | Out-Null
+    New-Item -ItemType Directory -Force (Join-Path $stage 'scripts\CodeThree\icons') | Out-Null
     New-Item -ItemType Directory -Force (Join-Path $root 'release') | Out-Null
 
-    Copy-Item $outDll                          (Join-Path $stage 'scripts\Flatline.dll')
-    Copy-Item (Join-Path $root 'Flatline.ini') (Join-Path $stage 'scripts\Flatline.ini')
+    Copy-Item $outDll                          (Join-Path $stage 'scripts\CodeThree.dll')
+    Copy-Item (Join-Path $root 'CodeThree.ini') (Join-Path $stage 'scripts\CodeThree.ini')
     Copy-Item (Join-Path $root 'README.md')    (Join-Path $stage 'README.txt')
 
     foreach ($p in Get-ChildItem (Join-Path $root 'data\icons') -Filter *.png) {
-        Copy-Item $p.FullName (Join-Path $stage 'scripts\Flatline\icons')
+        Copy-Item $p.FullName (Join-Path $stage 'scripts\CodeThree\icons')
     }
 
     # Every file the mod actually reads, by the path it reads it from. Missing any one of
     # these is a different broken install, and all of them are silent.
     [string[]]$must = @(
         'README.txt',
-        'scripts\Flatline.dll',
-        'scripts\Flatline.ini',
-        'scripts\Flatline\icons\seal-face.png',
-        'scripts\Flatline\icons\seal-ring.png'
+        'scripts\CodeThree.dll',
+        'scripts\CodeThree.ini',
+        'scripts\CodeThree\icons\seal-face.png',
+        'scripts\CodeThree\icons\seal-ring.png'
     )
 
     $missing = @()

@@ -1,7 +1,7 @@
 using System;
 using GTA;
 
-namespace Flatline.UI
+namespace CodeThree.UI
 {
     /// <summary>
     /// A number that catches up with itself instead of jumping.

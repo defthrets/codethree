@@ -2,9 +2,9 @@ using System;
 using GTA;
 using GTA.Math;
 using GTA.Native;
-using Flatline.Core;
+using CodeThree.Core;
 
-namespace Flatline.Scene
+namespace CodeThree.Scene
 {
     /// <summary>
     /// The bag. Carried over, put down beside him, picked up again on the way out.

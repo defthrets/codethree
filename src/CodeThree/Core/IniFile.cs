@@ -4,7 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Windows.Forms;
 
-namespace Flatline.Core
+namespace CodeThree.Core
 {
     /// <summary>
     /// Small INI reader. Tolerates both ';' and '//' comments, trailing inline comments,

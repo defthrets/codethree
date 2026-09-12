@@ -1,11 +1,11 @@
 using System;
 using GTA;
 using GTA.Native;
-using Flatline.Core;
-using Flatline.Scene;
-using Flatline.UI;
+using CodeThree.Core;
+using CodeThree.Scene;
+using CodeThree.UI;
 
-namespace Flatline
+namespace CodeThree
 {
     /// <summary>
     /// The one Script subclass, owning tick order for everything.
@@ -16,7 +16,7 @@ namespace Flatline
     /// crews were meant to be for, they are not for that, and the effect of watching it twice is
     /// that you stop looking at ambulances at all.
     ///
-    /// Flatline is the rest of that call-out. They kneel and they work on him, and then one of
+    /// Code Three is the rest of that call-out. They kneel and they work on him, and then one of
     /// two things happens depending on what actually killed him: a beating or a bat and he comes
     /// round and walks off, a gun or a car or a fire and they stop, fetch the trolley, load him,
     /// and drive him to the nearest hospital.

@@ -4,7 +4,7 @@ using GTA;
 using GTA.Math;
 using GTA.Native;
 
-namespace Flatline.Core
+namespace CodeThree.Core
 {
     /// <summary>
     /// The small things every other file here needs: loading a model without hanging, asking
