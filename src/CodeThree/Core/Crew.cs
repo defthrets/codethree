@@ -127,6 +127,59 @@ namespace CodeThree.Core
             catch { return true; }
         }
 
+        /// <summary>
+        /// Where a ped's health stops being health.
+        ///
+        /// A PED IS DEAD AT A HUNDRED, NOT AT NOUGHT. Health runs 0 to 200 and the engine treats
+        /// anything at or under 100 as fatally injured -- the bar the player sees is the top
+        /// half, 100 to 200, mapped to empty and full. An NPC dropped to 40 does not lie there
+        /// hurt; the engine kills him on the spot, because that is what an injured NPC does
+        /// unless SET_PED_DIES_WHEN_INJURED has been turned off for him.
+        ///
+        /// THIS MOD SHIPPED WITH THAT BUG AND THE LOG CAUGHT IT. 0.2.0 brought the patient back
+        /// into arrest at a fifth of his health -- 40 -- and every single call-out in a week of
+        /// play ended six seconds after the crew reached him with "the patient was killed",
+        /// because he was: by the engine, on the tick after the resurrection, for having 40
+        /// health. The flee guard then did exactly what it was written to do. Hoodrich's dog has
+        /// the same lesson written beside it and it was read past.
+        ///
+        /// So health is never set here as a fraction of the maximum. It is set as a fraction of
+        /// the part above the floor.
+        /// </summary>
+        public const int Floor = 100;
+
+        /// <summary>
+        /// Puts a ped at some fraction of the health that is actually his to lose.
+        ///
+        /// 0 is on the floor -- alive, and one scratch from not. 1 is full. Anything in between
+        /// is what the player's own bar would read at that fraction.
+        /// </summary>
+        public static void Hurt(Ped who, float fraction)
+        {
+            try
+            {
+                if (!There(who)) return;
+
+                var max = Function.Call<int>(Hash.GET_PED_MAX_HEALTH, who.Handle);
+                if (max <= Floor) max = 200;
+
+                if (fraction < 0f) fraction = 0f;
+                if (fraction > 1f) fraction = 1f;
+
+                var health = Floor + (int)((max - Floor) * fraction);
+
+                // NEVER ON THE LINE. A hundred exactly is dead on some code paths and dying on
+                // others, and neither is what "just alive" is meant to mean.
+                if (health <= Floor) health = Floor + 5;
+
+                Function.Call(Hash.SET_ENTITY_HEALTH, who.Handle, health);
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not set health: " + ex.Message);
+            }
+        }
+
         /// <summary>Hands a ped or a vehicle back to the game to clean up in its own time.</summary>
         public static void Give(Entity what)
         {

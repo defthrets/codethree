@@ -157,8 +157,18 @@ namespace CodeThree.Core
         /// The second man carries the bag. The crew back off if the patient is shot under them.
         /// And the corpse is held from the moment of dispatch, so the engine cannot tidy it
         /// away before the van gets there -- which it could, before.
+        ///
+        /// 0.2.1 -- he lives long enough to be worked on.
+        ///
+        /// A week of play and not one scene ran. The log had the whole story: every call-out
+        /// ended six seconds after the crew reached him with "the patient was killed", and the
+        /// player had not touched him. He was brought back into arrest at 40 health, and a ped
+        /// is dead at anything under a hundred -- the engine killed him again on the next tick
+        /// and the flee guard did exactly what it was written for. See Crew.Floor. Health is now
+        /// set as a fraction of the bar rather than of the number, in both places it was wrong,
+        /// and the two exits that used to leave the log silent say why they happened.
         /// </summary>
-        public const string Version = "0.2.0";
+        public const string Version = "0.2.1";
 
         /// <summary>The word on the splash row and at the top of the log.</summary>
         public const string Name = "Code Three";

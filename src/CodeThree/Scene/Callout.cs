@@ -308,7 +308,17 @@ namespace CodeThree.Scene
 
             try
             {
-                if (!Crew.Alive(_van) || !Crew.Alive(_driver)) { Done(); return; }
+                // SAID OUT LOUD. This exit and the one below used to be silent, and a silent
+                // exit reads in the log as a call-out that was dispatched and then simply never
+                // mentioned again -- which is what several looked like before anybody could tell
+                // a van that was wrecked from a player who drove off.
+                if (!Crew.Alive(_van) || !Crew.Alive(_driver))
+                {
+                    Log.Info("The call-out ended: the " + (Crew.Alive(_van) ? "driver" : "van") +
+                             " was lost.");
+                    Done();
+                    return;
+                }
 
                 var me = Game.Player.Character;
 
@@ -319,7 +329,8 @@ namespace CodeThree.Scene
                 if (me != null && me.Exists() &&
                     _van.Position.DistanceTo(me.Position) > _cfg.LetGoRange)
                 {
-                    Log.Debug("The call-out was left behind.");
+                    Log.Info("The call-out ended: you were " +
+                             (int)_van.Position.DistanceTo(me.Position) + "m away.");
                     Done();
                     return;
                 }
@@ -501,7 +512,18 @@ namespace CodeThree.Scene
             // SHOT UNDER THEIR HANDS. He is alive during this, so the player can kill him
             // again -- and if they do, the crew do what the scenario's own exit was authored
             // for, which is to get away from whoever did it.
-            if (!Crew.Alive(_body)) { To(Step.Fleeing, now); return; }
+            //
+            // AND IT SAYS WHEN. A death in the first second of the scene is not a shooting, it
+            // is something wrong with the resurrection, and the log needs to be able to tell
+            // the two apart -- that is exactly the distinction that would have found the health
+            // bug on the first evening instead of the seventh.
+            if (!Crew.Alive(_body))
+            {
+                Log.Warn("The patient died " + ((now - _stepAt) / 1000f).ToString("0.0") +
+                         "s into the scene" + (now - _stepAt < 1500 ? " -- too soon to have been shot." : "."));
+                To(Step.Fleeing, now);
+                return;
+            }
 
             if (!_mateBusy) Look(_mate);
 
@@ -559,10 +581,12 @@ namespace CodeThree.Scene
 
                 Function.Call(Hash.CLEAR_PED_TASKS_IMMEDIATELY, h);
 
-                var max = Function.Call<int>(Hash.GET_PED_MAX_HEALTH, h);
-                if (max <= 0) max = 200;
-
-                Function.Call(Hash.SET_ENTITY_HEALTH, h, Math.Max(30, max / 5));
+                // A THIRD OF THE BAR, NOT A THIRD OF THE NUMBER. See Crew.Floor for the bug this
+                // replaces: 40 out of 200 is not a badly hurt man, it is a dead one, and the
+                // engine made him one on the next tick every time. A third of what is actually
+                // his to lose leaves him takeable by a couple of deliberate shots -- which is the
+                // beat Fleeing exists for -- and not by a passing wing mirror.
+                Crew.Hurt(_body, 0.33f);
 
                 Function.Call(Hash.SET_PED_CAN_RAGDOLL, h, false);
                 Function.Call(Hash.SET_BLOCKING_OF_NON_TEMPORARY_EVENTS, h, true);
@@ -663,14 +687,21 @@ namespace CodeThree.Scene
 
             if (!_scene.Begin(beat.Loop, last))
             {
-                Log.Debug("The scene would not start for " + beat.Clip + ".");
+                // WARN, NOT DEBUG. These two lines are the difference between a log that says
+                // why the crew stood there and one that does not, and the whole week the health
+                // bug went unnoticed was a week of the log running at Info.
+                Log.Warn("The scene would not start for " + beat.Clip + ".");
                 return;
             }
 
             var a = _scene.Cast(_driver, Anim.CprMedic, beat.Clip);
             var b = _scene.Cast(_body, Anim.CprVictim, beat.Clip);
 
-            if (!a || !b) Log.Debug("Could not cast both into " + beat.Clip + ".");
+            if (!a || !b)
+            {
+                Log.Warn("Could not cast " + (!a && !b ? "either of them" : !a ? "the medic" : "the patient") +
+                         " into " + beat.Clip + ".");
+            }
         }
 
         /// <summary>
@@ -811,10 +842,11 @@ namespace CodeThree.Scene
 
                 Function.Call(Hash.CLEAR_PED_TASKS, h);
 
-                var max = Function.Call<int>(Hash.GET_PED_MAX_HEALTH, h);
-                if (max <= 0) max = 200;
+                // A third of the bar he can see, which is what "a third of his health" was
+                // always meant to say. The number it replaced -- 66 of 200 -- was under the
+                // floor, and he would have died on the pavement the moment they let go of him.
+                Crew.Hurt(_body, 0.33f);
 
-                Function.Call(Hash.SET_ENTITY_HEALTH, h, Math.Max(25, max / 3));
                 Function.Call(Hash.SET_PED_CAN_RAGDOLL, h, true);
                 Function.Call(Hash.SET_BLOCKING_OF_NON_TEMPORARY_EVENTS, h, false);
                 Function.Call(Hash.SET_PED_CAN_BE_TARGETTED, h, true);
