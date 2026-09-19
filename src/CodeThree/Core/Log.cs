@@ -167,8 +167,17 @@ namespace CodeThree.Core
         /// and the flee guard did exactly what it was written for. See Crew.Floor. Health is now
         /// set as a fraction of the bar rather than of the number, in both places it was wrong,
         /// and the two exits that used to leave the log silent say why they happened.
+        ///
+        /// 0.2.2 -- the van is not the scene.
+        ///
+        /// The first scene that ever reached compressions ended one second into them: the
+        /// player's crashed car was burning next to the parked ambulance, the ambulance was
+        /// wrecked, and the top-of-tick guard that ended the call-out on a lost van released
+        /// everyone mid-CPR. Medics do not stop working on a man because their vehicle took
+        /// damage. A lost van is now noted once, with how it was lost, and the scene carries on
+        /// -- only the steps that need somewhere to put him give up, and they give up on foot.
         /// </summary>
-        public const string Version = "0.2.1";
+        public const string Version = "0.2.2";
 
         /// <summary>The word on the splash row and at the top of the log.</summary>
         public const string Name = "Code Three";

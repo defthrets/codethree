@@ -167,6 +167,9 @@ namespace CodeThree.Scene
         /// <summary>Whether he is holding the lying-dead pose, which is what the trolley wants.</summary>
         private bool _posed;
 
+        /// <summary>Whether the ambulance has been wrecked or deleted out from under the scene.</summary>
+        private bool _vanLost;
+
         /// <summary>Whether the second man got his scenario, or is faking it with a clip.</summary>
         private bool _mateBusy;
 
@@ -279,6 +282,7 @@ namespace CodeThree.Scene
                 _ours = false;
                 _posed = false;
                 _mateBusy = false;
+                _vanLost = false;
 
                 Function.Call(Hash.TASK_VEHICLE_DRIVE_TO_COORD_LONGRANGE,
                               _driver.Handle, _van.Handle,
@@ -308,16 +312,31 @@ namespace CodeThree.Scene
 
             try
             {
-                // SAID OUT LOUD. This exit and the one below used to be silent, and a silent
-                // exit reads in the log as a call-out that was dispatched and then simply never
-                // mentioned again -- which is what several looked like before anybody could tell
-                // a van that was wrecked from a player who drove off.
-                if (!Crew.Alive(_van) || !Crew.Alive(_driver))
+                // THE DRIVER IS THE SCENE. He is the one kneeling, and there is no version of
+                // the call-out that carries on without him.
+                if (!Crew.Alive(_driver))
                 {
-                    Log.Info("The call-out ended: the " + (Crew.Alive(_van) ? "driver" : "van") +
-                             " was lost.");
+                    Log.Info("The call-out ended: the driver was lost.");
                     Done();
                     return;
+                }
+
+                // THE VAN IS NOT. This used to end the call-out the instant the ambulance was
+                // wrecked, and the first scene that ever got as far as compressions ended that
+                // way -- one second in, with the player's crashed car burning next to the van.
+                // Medics do not stop working on a man because their vehicle took damage. So a
+                // lost van is noted once, with how it was lost, and the scene carries on; only
+                // the steps that need somewhere to put him give up, and they give up on foot.
+                if (!Crew.Alive(_van))
+                {
+                    if (!_vanLost)
+                    {
+                        _vanLost = true;
+                        Log.Warn("The van was " + HowLost(_van) + " while " + State +
+                                 ". The crew carry on without it.");
+                    }
+
+                    if (_step == Step.Coming || _step >= Step.Fetching) { OnFoot(now, "there is no van to put him in"); return; }
                 }
 
                 var me = Game.Player.Character;
@@ -900,6 +919,9 @@ namespace CodeThree.Scene
             // value, and the loading is the part that touches other mods' corpses.
             if (!_cfg.TakeToHospital) { Leave(now, "they are not taking him"); return; }
 
+            // Nowhere to put him. They have done what they could.
+            if (_vanLost) { OnFoot(now, "there is no van to put him in"); return; }
+
             Unsettle(_mate);
 
             To(Step.Fetching, now);
@@ -1198,6 +1220,9 @@ namespace CodeThree.Scene
         {
             if (why != null) Log.Info("The call-out ended: " + why + ".");
 
+            // No van to get back into. They walk.
+            if (_vanLost || !Crew.Alive(_van)) { OnFoot(now, null); return; }
+
             if (_scene != null) _scene.End();
 
             _kit.Release();
@@ -1211,6 +1236,39 @@ namespace CodeThree.Scene
             To(Step.Driving, now);
 
             _to = Vector3.Zero;
+        }
+
+        /// <summary>
+        /// The crew walk away from it, because there is nothing to drive.
+        ///
+        /// THE PATIENT IS DEALT WITH FIRST, not abandoned mid-pose. Done() puts a man still ours
+        /// back to dead, which is right -- a resurrected patient the crew have walked away from
+        /// is either somebody they saved, who was already released alive before this can be
+        /// reached, or somebody they could not, who goes back to the road as he was found.
+        /// </summary>
+        private void OnFoot(int now, string why)
+        {
+            if (why != null) Log.Info("The call-out ended: " + why + ".");
+
+            Done();
+        }
+
+        /// <summary>How a vehicle came to fail the Alive check, for the log.</summary>
+        private static string HowLost(Vehicle van)
+        {
+            try
+            {
+                if (van == null || !van.Exists()) return "deleted -- something removed it";
+
+                var fire = Function.Call<bool>(Hash.IS_ENTITY_ON_FIRE, van.Handle);
+                var health = Function.Call<int>(Hash.GET_ENTITY_HEALTH, van.Handle);
+
+                return "wrecked (health " + health + (fire ? ", on fire" : "") + ")";
+            }
+            catch
+            {
+                return "lost";
+            }
         }
 
         private void Driving(int now)
@@ -1385,6 +1443,7 @@ namespace CodeThree.Scene
             _ours = false;
             _posed = false;
             _mateBusy = false;
+            _vanLost = false;
             _scene = null;
         }
 
@@ -1429,6 +1488,13 @@ namespace CodeThree.Scene
                 Function.Call(Hash.CLEAR_PED_TASKS, who.Handle);
                 Function.Call(Hash.SET_BLOCKING_OF_NON_TEMPORARY_EVENTS, who.Handle, false);
                 Function.Call(Hash.SET_PED_CAN_BE_TARGETTED, who.Handle, true);
+
+                // SOMEWHERE TO GO. A ped handed back with his tasks cleared stands exactly where
+                // he was let go of, indefinitely, which after a scene is a paramedic frozen in
+                // the road. Given a wander he becomes one of the city's again. Not when he is in
+                // the van -- a wander task on a seated ped is a man climbing out of a moving
+                // ambulance.
+                if (!who.IsInVehicle()) Function.Call(Hash.TASK_WANDER_STANDARD, who.Handle, 10f, 10);
             }
             catch
             {
