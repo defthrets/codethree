@@ -20,8 +20,19 @@ namespace CodeThree.Core
 
         public LogLevel Logging = LogLevel.Info;
 
-        /// <summary>A line in the feed when something happens in front of you.</summary>
-        public bool Announce = true;
+        /// <summary>
+        /// A line in the feed when something happens in front of you.
+        ///
+        /// OFF, AND THAT IS THE RIGHT DEFAULT. Everything this mod does is a thing you watch
+        /// happen in a street -- a van arriving, a man kneeling, a trolley going into the back.
+        /// A ticker narrating that is the mod telling you about a scene instead of letting you
+        /// look at it, and once the scene actually worked the lines stopped being reassurance
+        /// that something had happened and started being in the way.
+        ///
+        /// The switch stays, because a player who cannot yet tell whether the mod is running
+        /// wants it -- but it is a diagnostic now, not part of the show.
+        /// </summary>
+        public bool Announce = false;
 
         /// <summary>
         /// The key that opens the settings screen. Shift+H.
@@ -221,13 +232,13 @@ namespace CodeThree.Core
         /// <summary>The body on the trolley.</summary>
         public float BodyOnTrolleyX = 0f;
         public float BodyOnTrolleyY = 0f;
-        public float BodyOnTrolleyZ = 0.55f;
+        public float BodyOnTrolleyZ = 0f;
         public float BodyOnTrolleyYaw = 90f;
 
         /// <summary>The trolley in front of the medic pushing it.</summary>
         public float TrolleyPushX = 0f;
         public float TrolleyPushY = 1.1f;
-        public float TrolleyPushZ = -0.9f;
+        public float TrolleyPushZ = 0f;
 
         /// <summary>And the trolley in the back of the van.</summary>
         public float TrolleyInVanX = 0f;

@@ -288,6 +288,54 @@ namespace CodeThree.Core
         public const string LookDict = "amb@code_human_police_investigate@idle_a";
         public const string LookClip = "idle_a";
 
+        // ---- lifting him onto the trolley ---------------------------------------
+        //
+        // combat@drag_ped@ IS THE GAME'S OWN BODY LIFT, and it is a matched pair: every clip
+        // exists twice, once suffixed _plyr for the person doing the lifting and once _ped for
+        // the person being lifted. That is the same shape as mini@cpr and it goes through a
+        // synchronised scene for the same reason -- the arms go under the shoulders because
+        // both skeletons are placed from one origin by the animation data.
+        //
+        // THERE IS NO TWO-MAN LIFT IN THIS GAME. The whole dump was searched: combat@drag_ped@
+        // is one rescuer and one casualty, and nothing anywhere has two people lifting a third.
+        // So the driver lifts and the mate works beside him, which is what the clips allow
+        // rather than what would be ideal.
+        //
+        // FRONT, because the medic has been kneeling at the man's chest doing compressions and
+        // that is where he already is. The side and back variants exist for approaching a body
+        // from somewhere else, which never happens here.
+
+        public const string LiftDict = "combat@drag_ped@";
+        public const string LiftMedic = "injured_pickup_front_plyr";
+        public const string LiftBody = "injured_pickup_front_ped";
+
+        // ---- wheeling it -------------------------------------------------------
+
+        /// <summary>
+        /// Hands out in front at handle height, leaning into it.
+        ///
+        /// THE ONLY PUSHING POSE THE GAME HAS, and it belongs to a tramp with a shopping trolley
+        /// -- PROP_HUMAN_BUM_SHOPPING_CART, whose clips are these. At the grip it is a man with
+        /// both hands on a bar in front of him at waist height, which is a gurney as readily as
+        /// a shopping trolley.
+        ///
+        /// THERE IS NO PUSHING WALK. The movement clipsets were searched for one and the game
+        /// has none -- nothing named cart, carry, push, box or trolley. So this cannot be a
+        /// locomotion set, and instead goes on as an UPPER BODY SECONDARY clip over an ordinary
+        /// walk: his legs do the walking the task gave him and his arms hold the bar. See Push.
+        /// </summary>
+        public const string PushDict = "amb@prop_human_bum_shopping_cart@male@base";
+        public const string PushClip = "base";
+
+        /// <summary>
+        /// Loop, upper body only, secondary slot.
+        ///
+        /// 1 + 16 + 32. The upper-body bit is what leaves the legs to the walk underneath, and
+        /// the secondary bit is what stops it cancelling the walk task outright. Five0 Patrol
+        /// has the same number written down beside its hands-up pose, for the same reason.
+        /// </summary>
+        public const int Push = 49;
+
         // ---- how he walks away -------------------------------------------------
 
         public const string LimpMale = "move_m@injured";

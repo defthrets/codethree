@@ -176,8 +176,33 @@ namespace CodeThree.Core
         /// everyone mid-CPR. Medics do not stop working on a man because their vehicle took
         /// damage. A lost van is now noted once, with how it was lost, and the scene carries on
         /// -- only the steps that need somewhere to put him give up, and they give up on foot.
+        ///
+        /// 0.3.0 -- the loading, done properly.
+        ///
+        /// Three things were wrong and they were all the same shape: something was guessed that
+        /// could have been measured or asked for.
+        ///
+        /// The body vanished the instant the trolley appeared, twice, 25ms apart in the log.
+        /// RESURRECT_PED returns a ped blank and that includes its persistence, so from the
+        /// moment the crew reached him he was ambient again -- and loading the gurney model
+        /// yields, which is all the engine needs to reclaim him. He is re-held after every
+        /// resurrection and every pose, and the models are now requested at dispatch so nothing
+        /// yields mid-scene at all.
+        ///
+        /// The trolley materialised through the paramedic, because it was put down a metre
+        /// towards the van, which is exactly where he was standing. It goes out to the side now,
+        /// off the line he is on.
+        ///
+        /// And the offsets were never measurable from outside the game -- except they were.
+        /// GET_MODEL_DIMENSIONS gives the bounding box, the box says where the origin sits, and
+        /// the trolley now stands on its own wheels by arithmetic. The ini numbers are nudges on
+        /// top of a measurement rather than the whole answer.
+        ///
+        /// The scene itself gained the two beats it was missing: combat@drag_ped@, the game's
+        /// own paired body-lift, for getting him onto the canvas; and the shopping-trolley pose
+        /// worn on the upper body over an ordinary walk, for wheeling him to the van.
         /// </summary>
-        public const string Version = "0.2.2";
+        public const string Version = "0.3.0";
 
         /// <summary>The word on the splash row and at the top of the log.</summary>
         public const string Name = "Code Three";

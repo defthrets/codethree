@@ -180,6 +180,80 @@ namespace CodeThree.Core
             }
         }
 
+        /// <summary>
+        /// Keeps an entity from being tidied away by the engine, and keeps on keeping it.
+        ///
+        /// IsPersistent ALONE WAS NOT ENOUGH AND THE LOG PROVED IT. The body is marked persistent
+        /// the moment an ambulance is dispatched, and it still vanished -- twice, both times
+        /// within a frame of the trolley being spawned, with "the body had gone" logged 25ms
+        /// after "the crew brought a trolley out".
+        ///
+        /// RESURRECT_PED IS WHY. Hoodrich's note beside its own call says a resurrected ped comes
+        /// back blank -- out of its group, with none of its flags -- and the persistence flag is
+        /// one of the flags. So from the moment the crew reach him and bring him into arrest, the
+        /// patient is an ordinary ambient ped again as far as the population manager is
+        /// concerned, and the next time anything yields the engine is free to reclaim him. Model
+        /// loading yields. That is the whole bug.
+        ///
+        /// SET_ENTITY_AS_MISSION_ENTITY IS THE STRONGER FORM. IsPersistent sets the same flag but
+        /// the script-owned variant, with its two arguments, is the one that also takes the
+        /// entity out of the ambient population's budget -- which is what "do not reclaim this"
+        /// actually means. Both are set, because they are cheap and this has now cost two
+        /// evenings.
+        /// </summary>
+        public static void Hold(Entity what)
+        {
+            try
+            {
+                if (!There(what)) return;
+
+                Function.Call(Hash.SET_ENTITY_AS_MISSION_ENTITY, what.Handle, true, true);
+                what.IsPersistent = true;
+            }
+            catch
+            {
+                // Gone already, which the caller finds out from its own checks.
+            }
+        }
+
+        /// <summary>
+        /// How big a model is, and where its origin sits inside it.
+        ///
+        /// THE END OF THE GUESSING. Every attachment offset in this mod was a considered guess,
+        /// because a prop's origin is wherever the artist put it and there was said to be no way
+        /// to find that out from outside the running game. There is: GET_MODEL_DIMENSIONS hands
+        /// back the bounding box in model space, and the box says exactly where the origin is
+        /// relative to the geometry. A trolley whose min.Z is -0.35 has its origin 35cm above its
+        /// wheels, so to stand it on the ground you offset it up by 0.35 -- measured, not
+        /// guessed, and right on any model including one a player has replaced.
+        /// </summary>
+        public static bool Measure(string name, out Vector3 min, out Vector3 max)
+        {
+            min = Vector3.Zero;
+            max = Vector3.Zero;
+
+            try
+            {
+                var model = new Model(name);
+                if (!model.IsValid) return false;
+
+                var lo = new OutputArgument();
+                var hi = new OutputArgument();
+
+                Function.Call(Hash.GET_MODEL_DIMENSIONS, model.Hash, lo, hi);
+
+                min = lo.GetResult<Vector3>();
+                max = hi.GetResult<Vector3>();
+
+                return max.Z - min.Z > 0.01f;
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not measure " + name + ": " + ex.Message);
+                return false;
+            }
+        }
+
         /// <summary>Hands a ped or a vehicle back to the game to clean up in its own time.</summary>
         public static void Give(Entity what)
         {

@@ -29,7 +29,10 @@ namespace CodeThree.Scene
         /// <summary>Back to the van for the trolley.</summary>
         Fetching,
 
-        /// <summary>Trolley beside him, and him onto it.</summary>
+        /// <summary>Arms under his shoulders, lifting him.</summary>
+        Lifting,
+
+        /// <summary>And down onto the canvas.</summary>
         Loading,
 
         /// <summary>Wheeling him back.</summary>
@@ -257,6 +260,12 @@ namespace CodeThree.Scene
 
                 _mate = Crew.Aboard(_van, 0);
 
+                // THE TROLLEY IS ASKED FOR NOW AND USED IN A MINUTE. Loading a model yields,
+                // and a yield in the middle of the scene is the window the engine used to
+                // reclaim the patient through. Requested here, it is in memory long before
+                // anybody reaches for it and Bring never has to wait. See Gurney.Preload.
+                _trolley.Preload();
+
                 _body = death.Body;
                 _at = where;
 
@@ -264,7 +273,7 @@ namespace CodeThree.Scene
                 // van that takes a minute to arrive was, before, arriving at nothing about one
                 // time in five -- the log said "the body had gone" and nobody could say why.
                 // It is ours now, and Done() gives it back.
-                _body.IsPersistent = true;
+                Crew.Hold(_body);
 
                 // READ NOW, NOT AT THE SCENE. GET_PED_CAUSE_OF_DEATH is filled in when the ped
                 // dies and there is no promise about how long it stays useful -- and once he
@@ -362,6 +371,7 @@ namespace CodeThree.Scene
                     case Step.Rising:    Rising(now);    break;
                     case Step.Pronounce: Pronounce(now); break;
                     case Step.Fetching:  Fetching(now);  break;
+                    case Step.Lifting:   Lifting(now);   break;
                     case Step.Loading:   Loading(now);   break;
                     case Step.Wheeling:  Wheeling(now);  break;
                     case Step.Stowing:   Stowing(now);   break;
@@ -611,6 +621,13 @@ namespace CodeThree.Scene
                 Function.Call(Hash.SET_BLOCKING_OF_NON_TEMPORARY_EVENTS, h, true);
                 Function.Call(Hash.SET_PED_CAN_BE_TARGETTED, h, false);
                 Function.Call(Hash.SET_PED_FLEE_ATTRIBUTES, h, 0, false);
+
+                // AND HELD AGAIN, BECAUSE RESURRECT_PED JUST THREW THE HOLD AWAY. This is the
+                // line the whole disappearing-body bug came down to: he was marked persistent
+                // at dispatch, and a resurrected ped comes back blank -- Hoodrich's note says
+                // so in those words. From here until Done he is an ordinary ambient ped unless
+                // somebody says otherwise, and the next model load would reclaim him.
+                Crew.Hold(_body);
 
                 _ours = true;
                 _posed = false;
@@ -941,6 +958,10 @@ namespace CodeThree.Scene
             if (!Crew.Alive(_body)) return;
 
             _posed = Anim.Play(_body, Anim.DeadDict, Anim.DeadPose, Anim.Hold);
+
+            // AND HELD AGAIN. Anim.Play can load a dictionary, and loading yields. Every yield
+            // in this file is a place the patient could be reclaimed if the hold has slipped.
+            Crew.Hold(_body);
         }
 
         /// <summary>Out of whatever scenario or clip he was in, and back on his feet.</summary>
@@ -991,11 +1012,16 @@ namespace CodeThree.Scene
                 // The bag goes back with him, if he brought one.
                 if (_kit.There) _kit.Bring(_mate);
 
-                // BESIDE HIM, NOT ON HIM. Put down at his exact position it spawns through him,
-                // which for the three seconds before he is loaded looks like a trolley dropped
-                // on a corpse. A metre towards the van is where somebody wheeling it over would
-                // actually have stopped.
-                if (!_trolley.Bring(Beside(_body.Position), _body.Heading + 90f))
+                // CLEAR OF THE CREW, NOT JUST CLEAR OF THE BODY. It used to be put down a metre
+                // towards the van, which is exactly where the driver is standing -- he walked in
+                // from the van and has been kneeling at the man's chest ever since -- so the
+                // trolley materialised through him. That is the paramedic standing inside his
+                // own gurney in the screenshot.
+                //
+                // So it goes out to the SIDE: perpendicular to the line the driver is on, on
+                // whichever side he is not, far enough out that a man can stand between it and
+                // the body to do the lifting.
+                if (!_trolley.Bring(Alongside(), _body.Heading + 90f))
                 {
                     _carrying = true;
                 }
@@ -1003,7 +1029,115 @@ namespace CodeThree.Scene
 
             if (now - _stepAt < _cfg.FetchMs) return;
 
+            To(_carrying ? Step.Loading : Step.Lifting, now);
+        }
+
+        /// <summary>
+        /// A spot to stand the trolley in: out to one side of the body, away from the driver.
+        ///
+        /// The driver's own approach line is the thing being avoided, because he is the one who
+        /// will be lifting and he is standing on it. Perpendicular to it, on the far side.
+        /// </summary>
+        private Vector3 Alongside()
+        {
+            try
+            {
+                if (!Crew.There(_body)) return _at;
+
+                var body = _body.Position;
+
+                var from = Crew.Alive(_driver) ? _driver.Position
+                         : Crew.Alive(_van) ? _van.Position
+                         : body + Vector3.WorldNorth;
+
+                var line = body - from;
+                line.Z = 0f;
+
+                if (line.Length() < 0.4f) return body + Vector3.WorldEast * 1.4f;
+
+                line = line.Normalized;
+
+                // Perpendicular, on the ground. Which of the two sides does not matter as long
+                // as it is not the one with a man on it.
+                return body + new Vector3(-line.Y, line.X, 0f) * 1.4f;
+            }
+            catch
+            {
+                return _at;
+            }
+        }
+
+        // ---- lifting him --------------------------------------------------------
+
+        /// <summary>
+        /// How long the lift is given before it is taken as done regardless.
+        ///
+        /// A ceiling rather than a duration: the paired clip ends itself, and this is only here
+        /// so that a scene the engine refused to start cannot hold the call-out forever.
+        /// </summary>
+        private const int LiftMs = 5000;
+
+        /// <summary>And the beat with him on the canvas before anybody starts walking.</summary>
+        private const int SettleMs = 700;
+
+        private void Lifting(int now)
+        {
+            if (!Crew.There(_body)) { Leave(now, "the body had gone"); return; }
+
+            if (Entering())
+            {
+                if (_scene != null) _scene.End();
+
+                // THE LIFT IS A PAIR, LIKE THE CPR WAS. combat@drag_ped@ has a _plyr half and a
+                // _ped half authored around one origin, so the arms go under the shoulders
+                // rather than through the chest. Rooted on the body, facing the way he lies.
+                _scene = new Sync(_body.Position, _body.Heading);
+
+                var paired = _scene.Begin(false, true) &&
+                             _scene.Cast(_driver, Anim.LiftDict, Anim.LiftMedic) &&
+                             _scene.Cast(_body, Anim.LiftDict, Anim.LiftBody);
+
+                if (!paired)
+                {
+                    Log.Warn("The lift scene would not start; he goes straight onto the canvas.");
+                    To(Step.Loading, now);
+                    return;
+                }
+
+                // The second man steadies the trolley rather than standing over an empty patch
+                // of road.
+                Steady();
+                return;
+            }
+
+            var age = now - _stepAt;
+
+            if (age < 300) return;
+
+            var phase = _scene.Phase;
+            var done = phase >= 0.985f || (phase < 0f && age > 1200) || age > LiftMs;
+
+            if (!done) return;
+
             To(Step.Loading, now);
+        }
+
+        /// <summary>The mate at the trolley, hands on it, while the driver does the lifting.</summary>
+        private void Steady()
+        {
+            if (!Crew.Alive(_mate) || !_trolley.There) return;
+
+            try
+            {
+                var at = _trolley.Where - _mate.ForwardVector * 1.1f;
+
+                Function.Call(Hash.TASK_GO_STRAIGHT_TO_COORD, _mate.Handle,
+                              at.X, at.Y, at.Z, 1.4f, 4000, 0f, 0.3f);
+            }
+            catch
+            {
+                // He stands where he is, which is still a man at a scene.
+            }
         }
 
         private void Loading(int now)
@@ -1012,11 +1146,15 @@ namespace CodeThree.Scene
 
             if (Entering())
             {
+                if (_scene != null) _scene.End();
+
                 if (_carrying) Carry();
                 else if (!_trolley.Lay(_body)) { _carrying = true; Carry(); }
             }
 
-            if (now - _stepAt < _cfg.LoadMs) return;
+            // SHORT, BECAUSE THE LIFT WAS THE BEAT. This used to be the whole of the loading and
+            // took LoadMs; now it is just him settling onto the canvas before anybody moves.
+            if (now - _stepAt < SettleMs) return;
 
             if (!_carrying) _trolley.Take(_driver);
 
@@ -1096,10 +1234,22 @@ namespace CodeThree.Scene
 
         private void Wheeling(int now)
         {
+            // THE PUSH POSE, RE-ASKED EVERY PASS AND ON THE UPPER BODY ONLY.
+            //
+            // The game has no pushing WALK -- the movement clipsets were searched and there is
+            // nothing for a cart, a trolley or a crate -- so this cannot be locomotion. What it
+            // can be is the shopping-trolley pose laid over an ordinary walk in the secondary
+            // slot: his legs do the walking his task gave him, his arms hold the bar. Anim.Play
+            // only issues a clip that is not already running, so calling it every tick holds the
+            // pose rather than restarting it. See Anim.Push.
+            if (!_carrying) Anim.Play(_driver, Anim.PushDict, Anim.PushClip, Anim.Push);
+
             var there = Crew.Alive(_driver) && Crew.Alive(_van) &&
                         _driver.Position.DistanceTo(_van.Position) < 4.5f;
 
             if (!there && now - _stepAt < _cfg.WheelMs) return;
+
+            Anim.Stop(_driver, Anim.PushDict, Anim.PushClip);
 
             To(Step.Stowing, now);
         }
@@ -1356,7 +1506,8 @@ namespace CodeThree.Scene
                     case Step.Rising:    return "getting him up";
                     case Step.Pronounce: return "calling it";
                     case Step.Fetching:  return "fetching the trolley";
-                    case Step.Loading:   return _carrying ? "picking him up" : "loading him";
+                    case Step.Lifting:   return "lifting him";
+                    case Step.Loading:   return _carrying ? "picking him up" : "onto the canvas";
                     case Step.Wheeling:  return _carrying ? "carrying him back" : "wheeling him back";
                     case Step.Stowing:   return "into the back";
                     case Step.Driving:   return _to == Vector3.Zero
