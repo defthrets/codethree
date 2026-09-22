@@ -1021,7 +1021,13 @@ namespace CodeThree.Scene
                 // So it goes out to the SIDE: perpendicular to the line the driver is on, on
                 // whichever side he is not, far enough out that a man can stand between it and
                 // the body to do the lifting.
-                if (!_trolley.Bring(Alongside(), _body.Heading + 90f))
+                // POINTED AT THE AMBULANCE. Its heading used to be taken off the body, which is
+                // however he happened to fall -- so the trolley was laid out at a random angle
+                // and the man pushing it had to drag it round before he could start. Aimed at
+                // the van, the back of it is where he stands and forward is where he is going.
+                var spot = Alongside();
+
+                if (!_trolley.Bring(spot, Toward(spot, Crew.Alive(_van) ? _van.Position : _at)))
                 {
                     _carrying = true;
                 }
@@ -1038,6 +1044,23 @@ namespace CodeThree.Scene
         /// The driver's own approach line is the thing being avoided, because he is the one who
         /// will be lifting and he is standing on it. Perpendicular to it, on the far side.
         /// </summary>
+        /// <summary>The heading that points from one spot at another, in degrees.</summary>
+        private static float Toward(Vector3 from, Vector3 to)
+        {
+            try
+            {
+                var d = to - from;
+
+                if (d.Length() < 0.2f) return 0f;
+
+                return (float)(Math.Atan2(d.Y, d.X) * 180d / Math.PI) - 90f;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
         private Vector3 Alongside()
         {
             try
@@ -1150,13 +1173,33 @@ namespace CodeThree.Scene
 
                 if (_carrying) Carry();
                 else if (!_trolley.Lay(_body)) { _carrying = true; Carry(); }
+
+                // AND THE MAN WALKS TO THE TROLLEY, NOT THE TROLLEY TO THE MAN.
+                //
+                // Take() used to be called the instant the body was loaded, and Take is what
+                // starts the trolley following him -- so the bed leapt across the pavement to
+                // wherever he happened to be standing, which is the gurney "coming up" to meet
+                // the body instead of the body being put down on it. Nothing about the trolley
+                // should move during a load: it is a thing with wheels standing on a road, and
+                // he is the one who walks.
+                if (!_carrying) Step_(_driver, _trolley.Behind, 4000);
             }
 
-            // SHORT, BECAUSE THE LIFT WAS THE BEAT. This used to be the whole of the loading and
-            // took LoadMs; now it is just him settling onto the canvas before anybody moves.
             if (now - _stepAt < SettleMs) return;
 
-            if (!_carrying) _trolley.Take(_driver);
+            if (_carrying)
+            {
+                Carrying(now);
+                return;
+            }
+
+            // He is behind it, or he has had long enough trying.
+            var set = Crew.Alive(_driver) &&
+                      _driver.Position.DistanceTo(_trolley.Behind) < 1.3f;
+
+            if (!set && now - _stepAt < _cfg.LoadMs) return;
+
+            _trolley.Take(_driver);
 
             Walk(_driver);
             Walk(_mate);
@@ -1211,6 +1254,33 @@ namespace CodeThree.Scene
             catch
             {
                 return body;
+            }
+        }
+
+        /// <summary>No trolley to get behind, so he simply sets off carrying him.</summary>
+        private void Carrying(int now)
+        {
+            Walk(_driver);
+            Walk(_mate);
+
+            To(Step.Wheeling, now);
+        }
+
+        /// <summary>Walks somebody to an exact spot, on the ground, without running.</summary>
+        private static void Step_(Ped who, Vector3 to, int ms)
+        {
+            if (!Crew.Alive(who)) return;
+
+            try
+            {
+                var at = new Vector3(to.X, to.Y, Crew.Ground(to, to.Z));
+
+                Function.Call(Hash.TASK_GO_STRAIGHT_TO_COORD, who.Handle,
+                              at.X, at.Y, at.Z, 1.3f, ms, 0f, 0.2f);
+            }
+            catch
+            {
+                // The deadline moves it on regardless.
             }
         }
 

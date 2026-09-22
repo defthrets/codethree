@@ -107,6 +107,24 @@ namespace CodeThree.Scene
         }
 
         /// <summary>
+        /// The spot at the back of it, where a man would stand to push.
+        ///
+        /// The trolley is laid out pointing at the ambulance -- see Callout.Fetching -- so its
+        /// own backward direction is where the pushing happens, and walking there puts him
+        /// behind it facing the way it is going.
+        /// </summary>
+        public Vector3 Behind
+        {
+            get
+            {
+                if (!There) return Vector3.Zero;
+
+                try { return _trolley.Position - _trolley.ForwardVector * _cfg.TrolleyPushY; }
+                catch { return _trolley.Position; }
+            }
+        }
+
+        /// <summary>
         /// Asks for the models, without waiting for them.
         ///
         /// CALLED AT DISPATCH, USED A MINUTE LATER. Request is not a blocking call; it puts the
@@ -168,16 +186,18 @@ namespace CodeThree.Scene
 
                     Shape(name);
 
-                    // ON THE GROUND WHERE IT IS PUT DOWN, NOT AT THE BODY'S HEIGHT. The spot
-                    // comes from the body's position, and the body is often against a kerb --
-                    // so borrowing its Z stands the trolley in the air on one side of the road
-                    // and inside the pavement on the other. The engine's own answer is asked
-                    // for instead, and only then is the thing frozen, because a frozen prop is
-                    // one the grounding call cannot move.
-                    Function.Call(Hash.SET_ENTITY_COORDS, _trolley.Handle,
-                                  at.X, at.Y, at.Z + _standZ + 0.5f, false, false, false, false);
+                    // ON THE ROAD, BY MEASUREMENT, AND THEN NAILED THERE.
+                    //
+                    // The spot comes from the body's position and the body is usually lying
+                    // against something, so its Z is not the ground's. The world is asked
+                    // instead -- see Crew.Ground -- and the trolley's own measured origin does
+                    // the rest. PLACE_OBJECT_ON_GROUND_PROPERLY is not used: it needs a prop
+                    // with live physics, and a prop with live physics next to a ragdoll is the
+                    // thing that was shoving the body about two versions ago.
+                    var ground = Crew.Ground(at, at.Z);
 
-                    Function.Call(Hash.PLACE_OBJECT_ON_GROUND_PROPERLY, _trolley.Handle);
+                    Function.Call(Hash.SET_ENTITY_COORDS_NO_OFFSET, _trolley.Handle,
+                                  at.X, at.Y, ground + _standZ, false, false, false);
 
                     Function.Call(Hash.FREEZE_ENTITY_POSITION, _trolley.Handle, true);
 
@@ -311,8 +331,14 @@ namespace CodeThree.Scene
                 var ahead = feet + _pushing.ForwardVector * _cfg.TrolleyPushY
                                  + _pushing.RightVector * _cfg.TrolleyPushX;
 
+                // THE ROAD'S HEIGHT, NOT THE MEDIC'S. His entity position is usually the ground
+                // under him and that is not the same as always: mid-animation, on a step, part
+                // way up a kerb, it is somewhere else -- and the trolley inherited every one of
+                // those. Asked of the world, it sits on the road he is walking along.
+                var ground = Crew.Ground(ahead, feet.Z);
+
                 Function.Call(Hash.SET_ENTITY_COORDS_NO_OFFSET, _trolley.Handle,
-                              ahead.X, ahead.Y, feet.Z + _standZ + _cfg.TrolleyPushZ,
+                              ahead.X, ahead.Y, ground + _standZ + _cfg.TrolleyPushZ,
                               false, false, false);
 
                 _trolley.Heading = _pushing.Heading;

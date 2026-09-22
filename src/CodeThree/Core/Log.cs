@@ -217,8 +217,26 @@ namespace CodeThree.Core
         /// skeletons needs to be known or guessed. And where it is first put down it is now
         /// grounded by the engine rather than given the body's height, which was standing it in
         /// the air whenever the body lay against a kerb.
+        ///
+        /// 0.3.2 -- the bed stays where it was put down.
+        ///
+        /// Take() -- the call that starts the trolley following the medic -- was made the
+        /// instant the body was loaded, so the bed leapt across the pavement to wherever he
+        /// happened to be standing. Watched from the street that is the gurney rising up to
+        /// meet the body rather than the body being laid down on it, which is what it was
+        /// reported as, in those words. Nothing about a trolley should move during a load: it
+        /// is a thing with wheels standing on a road, and the man is the one who walks. So he
+        /// is sent to the back of it and only picks it up once he is there.
+        ///
+        /// It is also laid out pointing AT the ambulance now, rather than at whatever angle the
+        /// body happened to fall, so the back of it is where he stands and forward is where he
+        /// is going.
+        ///
+        /// And the last borrowed height is gone. Every floating-prop bug in this mod has been a
+        /// Z taken from something that is only usually on the floor -- first the body, then the
+        /// medic. The world is asked directly now, through Crew.Ground.
         /// </summary>
-        public const string Version = "0.3.1";
+        public const string Version = "0.3.2";
 
         /// <summary>The word on the splash row and at the top of the log.</summary>
         public const string Name = "Code Three";

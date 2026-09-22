@@ -254,6 +254,39 @@ namespace CodeThree.Core
             }
         }
 
+        /// <summary>
+        /// The height of the road at a spot, asked of the world rather than inferred.
+        ///
+        /// EVERY FLOATING-PROP BUG IN THIS MOD HAS BEEN A BORROWED Z. The trolley took the
+        /// body's height, and bodies lie against kerbs; then it took the medic's height, and a
+        /// medic mid-animation is not reliably stood on the floor. Both are inferences about
+        /// where the ground is, made from something that is only usually on it.
+        ///
+        /// GET_GROUND_Z_FOR_3D_COORD is the world's own answer, and it is asked from a metre up
+        /// so the probe starts above the surface rather than inside whatever is lying on it.
+        /// The fallback is the caller's guess, which is no worse than what it had before.
+        /// </summary>
+        public static float Ground(Vector3 at, float fallback)
+        {
+            try
+            {
+                float z;
+
+                if (World.GetGroundHeight(new Vector3(at.X, at.Y, at.Z + 1f), out z,
+                                          GetGroundHeightMode.Normal) &&
+                    Math.Abs(z - fallback) < 8f)
+                {
+                    return z;
+                }
+            }
+            catch
+            {
+                // The fallback below.
+            }
+
+            return fallback;
+        }
+
         /// <summary>Hands a ped or a vehicle back to the game to clean up in its own time.</summary>
         public static void Give(Entity what)
         {
