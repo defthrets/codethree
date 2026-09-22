@@ -201,8 +201,24 @@ namespace CodeThree.Core
         /// The scene itself gained the two beats it was missing: combat@drag_ped@, the game's
         /// own paired body-lift, for getting him onto the canvas; and the shopping-trolley pose
         /// worn on the upper body over an ordinary walk, for wheeling him to the van.
+        ///
+        /// 0.3.1 -- the trolley comes back down.
+        ///
+        /// The measurement was right and the thing it was measured against was wrong. It said
+        /// the gurney's origin sits at its wheels, which is true; the trolley was then welded to
+        /// the medic at bone index 0 on the belief that bone 0 means the entity's own origin,
+        /// between a ped's feet. For a ped bone 0 is SKEL_ROOT, which is the PELVIS -- so the
+        /// wheels were planted at his waist and the frame stood at chest height, and fixedRot
+        /// rolled the whole thing over every time an animation bent him.
+        ///
+        /// Both faults are the attachment, so the attachment is gone: while he wheels it, the
+        /// trolley is placed each tick a fixed distance along his facing at the height of his
+        /// feet, square to the world. A ped's position IS the ground under him, so nothing about
+        /// skeletons needs to be known or guessed. And where it is first put down it is now
+        /// grounded by the engine rather than given the body's height, which was standing it in
+        /// the air whenever the body lay against a kerb.
         /// </summary>
-        public const string Version = "0.3.0";
+        public const string Version = "0.3.1";
 
         /// <summary>The word on the splash row and at the top of the log.</summary>
         public const string Name = "Code Three";

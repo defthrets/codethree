@@ -1242,7 +1242,15 @@ namespace CodeThree.Scene
             // slot: his legs do the walking his task gave him, his arms hold the bar. Anim.Play
             // only issues a clip that is not already running, so calling it every tick holds the
             // pose rather than restarting it. See Anim.Push.
-            if (!_carrying) Anim.Play(_driver, Anim.PushDict, Anim.PushClip, Anim.Push);
+            if (!_carrying)
+            {
+                Anim.Play(_driver, Anim.PushDict, Anim.PushClip, Anim.Push);
+
+                // AND THE TROLLEY KEPT IN FRONT OF HIM, EVERY TICK. It is driven rather than
+                // welded -- see Gurney.Follow for why the weld put it at chest height and tilted
+                // it whenever he leaned.
+                _trolley.Follow();
+            }
 
             var there = Crew.Alive(_driver) && Crew.Alive(_van) &&
                         _driver.Position.DistanceTo(_van.Position) < 4.5f;

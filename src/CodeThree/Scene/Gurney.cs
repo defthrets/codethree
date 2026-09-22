@@ -164,13 +164,22 @@ namespace CodeThree.Scene
 
                     _trolley.Heading = heading;
 
-                    Function.Call(Hash.FREEZE_ENTITY_POSITION, _trolley.Handle, true);
                     Function.Call(Hash.SET_ENTITY_LOD_DIST, _trolley.Handle, 300);
 
                     Shape(name);
 
+                    // ON THE GROUND WHERE IT IS PUT DOWN, NOT AT THE BODY'S HEIGHT. The spot
+                    // comes from the body's position, and the body is often against a kerb --
+                    // so borrowing its Z stands the trolley in the air on one side of the road
+                    // and inside the pavement on the other. The engine's own answer is asked
+                    // for instead, and only then is the thing frozen, because a frozen prop is
+                    // one the grounding call cannot move.
                     Function.Call(Hash.SET_ENTITY_COORDS, _trolley.Handle,
-                                  at.X, at.Y, at.Z + _standZ, false, false, false, false);
+                                  at.X, at.Y, at.Z + _standZ + 0.5f, false, false, false, false);
+
+                    Function.Call(Hash.PLACE_OBJECT_ON_GROUND_PROPERLY, _trolley.Handle);
+
+                    Function.Call(Hash.FREEZE_ENTITY_POSITION, _trolley.Handle, true);
 
                     Log.Info("The crew brought a trolley out (" + name + ").");
                     return true;
@@ -270,26 +279,56 @@ namespace CodeThree.Scene
                           false, 2, true, 0);
         }
 
-        /// <summary>And the trolley against whoever currently has it.</summary>
+        /// <summary>
+        /// Keeps the trolley in front of the man pushing it. Called every tick while he walks.
+        ///
+        /// DRIVEN, NOT ATTACHED, AND THAT IS THE FIX FOR THE FLOATING GURNEY.
+        ///
+        /// It was welded to him with ATTACH_ENTITY_TO_ENTITY at bone index 0, on the reasoning
+        /// that bone 0 means the entity's own origin -- which for a ped is between his feet. It
+        /// does not. For a ped, bone 0 is SKEL_ROOT, and SKEL_ROOT is the PELVIS, a metre up. So
+        /// the trolley's wheels were planted at his waist and the frame stood at chest height,
+        /// which is the gurney hanging in the air in the screenshot. The measurement was right;
+        /// the thing it was measured against was wrong.
+        ///
+        /// AND fixedRot MADE IT TILT. A welded entity turns with its parent bone, so every time
+        /// the animation bent him over the trolley rolled with his hips. A gurney does not lean
+        /// when the man pushing it leans.
+        ///
+        /// Both problems are the attachment itself, so there is no attachment. His position is
+        /// the ground under his feet -- that is what a ped's entity position IS -- so the trolley
+        /// goes a fixed distance along his facing, at that height, square to the world. Set
+        /// every tick it is as smooth as the frame rate, it cannot tilt, and it needs nothing
+        /// known about skeletons.
+        /// </summary>
+        public void Follow()
+        {
+            if (!There || _holder != Held.OnMedic || !Crew.Alive(_pushing)) return;
+
+            try
+            {
+                var feet = _pushing.Position;
+                var ahead = feet + _pushing.ForwardVector * _cfg.TrolleyPushY
+                                 + _pushing.RightVector * _cfg.TrolleyPushX;
+
+                Function.Call(Hash.SET_ENTITY_COORDS_NO_OFFSET, _trolley.Handle,
+                              ahead.X, ahead.Y, feet.Z + _standZ + _cfg.TrolleyPushZ,
+                              false, false, false);
+
+                _trolley.Heading = _pushing.Heading;
+            }
+            catch
+            {
+                // One frame of the trolley not keeping up is not worth a log line every tick.
+            }
+        }
+
+        /// <summary>And the trolley against whatever it is actually attached to.</summary>
         private void ToHolder()
         {
             if (!There) return;
 
-            if (_holder == Held.OnMedic && Crew.Alive(_pushing))
-            {
-                // THE MEASURED HEIGHT IS THE WHOLE OF THIS. A ped's origin is between his feet,
-                // so standing the trolley on the ground in front of him means lifting it by
-                // exactly the distance from its own origin down to its wheels -- which is what
-                // _standZ is. The previous version had a flat -0.9 here, which buried it.
-                Function.Call(Hash.ATTACH_ENTITY_TO_ENTITY,
-                              _trolley.Handle, _pushing.Handle, 0,
-                              _cfg.TrolleyPushX,
-                              _cfg.TrolleyPushY,
-                              _standZ + _cfg.TrolleyPushZ,
-                              0f, 0f, 0f,
-                              false, false, false, false, 2, true, 0);
-                return;
-            }
+            if (_holder == Held.OnMedic) { Follow(); return; }
 
             if (_holder == Held.InVan && Crew.Alive(_aboard))
             {
@@ -342,10 +381,13 @@ namespace CodeThree.Scene
                 _pushing = medic;
                 _holder = Held.OnMedic;
 
-                // It is being carried now, so it must not also be nailed to the world.
-                Function.Call(Hash.FREEZE_ENTITY_POSITION, _trolley.Handle, false);
+                // FROZEN IS EXACTLY WHAT IT WANTS TO BE NOW. It is being moved by hand every
+                // tick rather than attached, and a prop with physics live would fight that --
+                // falling between the frames it is placed on, and shoving the crew about. Frozen
+                // it goes precisely where it is put and nowhere else.
+                Function.Call(Hash.FREEZE_ENTITY_POSITION, _trolley.Handle, true);
 
-                ToHolder();
+                Follow();
                 return true;
             }
             catch (Exception ex)
@@ -371,6 +413,8 @@ namespace CodeThree.Scene
                 _aboard = van;
                 _holder = Held.InVan;
 
+                // Attached for real this time, because a vehicle's bone 0 IS its chassis origin
+                // -- the trap above is specific to peds, whose bone 0 is the pelvis.
                 ToHolder();
 
                 Log.Debug("The trolley is in the back.");
