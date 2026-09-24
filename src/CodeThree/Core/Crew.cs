@@ -287,6 +287,104 @@ namespace CodeThree.Core
             return fallback;
         }
 
+        /// <summary>SKEL_Head and SKEL_Pelvis, by bone id.</summary>
+        private const int HeadBone = 31086;
+        private const int PelvisBone = 11816;
+
+        /// <summary>
+        /// Where somebody's pelvis actually is -- the ragdoll's, not the capsule's.
+        ///
+        /// A DEAD PED'S POSITION IS NOT WHERE HE IS LYING. The entity position follows the root,
+        /// and the root of a ragdoll is somewhere near the pelvis but not reliably on it; the
+        /// capsule's heading, meanwhile, is whatever he was facing when he was hit, and bears no
+        /// relation to which way he fell. Posing him from either of those is how a body flips
+        /// round the moment the crew kneel. The bones are where the body visibly is.
+        /// </summary>
+        public static bool Pelvis(Ped who, out Vector3 at)
+        {
+            at = Vector3.Zero;
+
+            try
+            {
+                if (!There(who)) return false;
+
+                at = Function.Call<Vector3>(Hash.GET_PED_BONE_COORDS, who.Handle, PelvisBone, 0f, 0f, 0f);
+
+                return at != Vector3.Zero;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Which way he is lying: the heading from his pelvis to his head, on the ground.
+        ///
+        /// NaN when it cannot be told, which callers read as "leave the heading alone".
+        /// </summary>
+        public static float Lying(Ped who)
+        {
+            try
+            {
+                if (!There(who)) return float.NaN;
+
+                var head = Function.Call<Vector3>(Hash.GET_PED_BONE_COORDS, who.Handle, HeadBone, 0f, 0f, 0f);
+                var pelvis = Function.Call<Vector3>(Hash.GET_PED_BONE_COORDS, who.Handle, PelvisBone, 0f, 0f, 0f);
+
+                var axis = Motion.Flat(head - pelvis);
+
+                // Under twenty centimetres flat is a man sitting up or a bone read that failed;
+                // either way there is no lying direction to speak of.
+                if (axis.Length() < 0.2f) return float.NaN;
+
+                return Motion.HeadingOf(axis);
+            }
+            catch
+            {
+                return float.NaN;
+            }
+        }
+
+        /// <summary>
+        /// Stops something colliding, or lets it again.
+        ///
+        /// A body carried through the air onto a trolley has to pass through the trolley's rail
+        /// on the way, and a trolley pushed up to an ambulance has to be allowed to overlap its
+        /// bumper for a frame. Collision in either case is the physics resolving an overlap by
+        /// throwing one of them -- which, with a frozen trolley and a van, is how the van was
+        /// being launched out of the world.
+        /// </summary>
+        public static void Solid(Entity what, bool solid)
+        {
+            try
+            {
+                if (!There(what)) return;
+
+                Function.Call(Hash.SET_ENTITY_COLLISION, what.Handle, solid, solid);
+            }
+            catch
+            {
+                // It stays as it was.
+            }
+        }
+
+        /// <summary>A point given in an entity's own frame, as a position in the world.</summary>
+        public static Vector3 Offset(Entity from, float x, float y, float z)
+        {
+            try
+            {
+                if (!There(from)) return Vector3.Zero;
+
+                return Function.Call<Vector3>(Hash.GET_OFFSET_FROM_ENTITY_IN_WORLD_COORDS,
+                                              from.Handle, x, y, z);
+            }
+            catch
+            {
+                return Vector3.Zero;
+            }
+        }
+
         /// <summary>Hands a ped or a vehicle back to the game to clean up in its own time.</summary>
         public static void Give(Entity what)
         {

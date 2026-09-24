@@ -129,6 +129,17 @@ namespace CodeThree.UI
         /// <summary>Whether the man at that scene was one they could have had. Wired by Main.</summary>
         public Func<bool> Hopeful;
 
+        /// <summary>
+        /// Stages a call-out in front of the player: true for one they can save, false for one
+        /// they cannot. Wired by Main.
+        ///
+        /// THE SCENE WAS NEARLY UNTESTABLE. Seeing it meant killing somebody somewhere a van
+        /// could path to, then waiting up to two minutes -- and a third of the time the van
+        /// never arrived. Most of what went wrong with the animation was reported a screenshot
+        /// at a time because getting one screenshot cost ten minutes.
+        /// </summary>
+        public Action<bool> Stage;
+
         public Options(Settings cfg)
         {
             _cfg = cfg;
@@ -151,6 +162,16 @@ namespace CodeThree.UI
         /// </summary>
         private void Rows()
         {
+            Head("WATCH IT");
+
+            Act("Stage a call-out: a beating",
+                "A man goes down four metres in front of you and a van comes from forty out. They save him.",
+                () => { if (Stage != null) Stage(true); });
+
+            Act("Stage a call-out: a shooting",
+                "The same, but he is gone -- CPR, the clipboard, the trolley, the back of the van.",
+                () => { if (Stage != null) Stage(false); });
+
             Head("GENERAL");
 
             Toggle("Mod enabled", "Everything off, without uninstalling anything.",
@@ -386,6 +407,33 @@ namespace CodeThree.UI
         private void Head(string label)
         {
             _rows.Add(new Knob { Label = label });
+        }
+
+        /// <summary>
+        /// A row that does something rather than setting something.
+        ///
+        /// It closes the menu as it fires, because every action here is something to go and
+        /// look at -- and it touches nothing, so closing writes nothing to the ini.
+        /// </summary>
+        private void Act(string label, string detail, Action run)
+        {
+            var knob = new Knob
+            {
+                Label = label,
+                Detail = detail,
+                Read = () => "GO",
+                Fill = () => -1f,
+            };
+
+            knob.Nudge = d =>
+            {
+                if (Open) Toggle();
+
+                try { run(); }
+                catch (Exception ex) { Log.Warn("The menu action failed: " + ex.Message); }
+            };
+
+            _rows.Add(knob);
         }
 
         private void Toggle(string label, string detail, string section, string key,

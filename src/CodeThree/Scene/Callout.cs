@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using GTA;
 using GTA.Math;
 using GTA.Native;
@@ -26,19 +27,19 @@ namespace CodeThree.Scene
         /// <summary>It did not. Standing over him, writing it down.</summary>
         Pronounce,
 
-        /// <summary>Back to the van for the trolley.</summary>
+        /// <summary>The trolley out beside him.</summary>
         Fetching,
 
         /// <summary>Arms under his shoulders, lifting him.</summary>
         Lifting,
 
-        /// <summary>And down onto the canvas.</summary>
+        /// <summary>Carried onto the canvas, and the medic round to the back of it.</summary>
         Loading,
 
-        /// <summary>Wheeling him back.</summary>
+        /// <summary>Wheeling him to the van.</summary>
         Wheeling,
 
-        /// <summary>Into the back, doors shut, crew aboard.</summary>
+        /// <summary>Rolled into the back, doors shut, crew aboard.</summary>
         Stowing,
 
         /// <summary>Driving. Either to the hospital, or away empty.</summary>
@@ -54,64 +55,81 @@ namespace CodeThree.Scene
     /// THIS IS THE MOD. Everything else in the project finds a body, decides what killed it, or
     /// keeps another mod out of the way; this is the part somebody watches.
     ///
-    /// THE PATIENT IS A PARTICIPANT, NOT A PROP. That is the whole difference between this and
-    /// the first version. A corpse is a ragdoll and cannot be animated, so 0.1.0 played half a
-    /// two-hander over a heap and hoped the compressions landed somewhere near a chest. Here he
-    /// is brought back into arrest the moment the crew reach him -- alive in the engine's eyes,
-    /// unconscious in everybody else's -- and from then on he is one of two people in a
-    /// synchronised scene, placed by the animation data rather than by us. The hands land on
-    /// the sternum because the game authored both halves of every clip around one origin.
+    /// THE PATIENT IS A PARTICIPANT, NOT A PROP. A corpse is a ragdoll and cannot be animated,
+    /// so he is brought back into arrest the moment the crew reach him -- alive in the engine's
+    /// eyes, unconscious in everybody else's -- and from then on he is one of two people in a
+    /// synchronised scene, placed by the animation data rather than by us.
     ///
-    /// AND IT IS THE WHOLE SEQUENCE, NOT A LOOP. mini@cpr has seven clips and they are a story:
-    /// down to a knee, a look at him, the lean in, the compressions, sitting back, another look
-    /// -- and then either the one where he comes up or the one where the medic does. 0.1.0
-    /// played the compressions and the ending. This plays all of it, in the order it was
-    /// written, advanced by each clip finishing rather than by a stopwatch.
+    /// NOTHING TELEPORTS. That is the rule 0.4.0 was built around, because every complaint that
+    /// the scene looked janky came down to something jumping: the medic snapping onto his mark,
+    /// the body flipping round as he knelt, the trolley rising to meet the body, the body
+    /// leaping from the medic's arms onto the bed, the trolley appearing in the back of the van.
+    /// Each of those is now either a measurement or a movement:
     ///
-    /// ONE AT A TIME, AND THAT IS NOT A LIMITATION. Two ambulances at one junction is a
-    /// pile-up rather than a scene, and a second call refused is a second call that would have
-    /// arrived at an empty street anyway.
+    ///   the patient anchors every scene where he already lies (Sync.Anchored), so he does not
+    ///   move when it starts -- and his opening pose is turned to match the way his ragdoll
+    ///   actually fell, read off his bones, rather than the capsule's meaningless heading;
     ///
-    /// EVERY STEP HAS A DEADLINE AND A WAY OUT. A crew that cannot reach a body on a rooftop, a
-    /// scene the engine will not start, a trolley that will not load -- none of those may leave
-    /// the call-out stuck, because a stuck call-out holds two persistent peds, a vehicle, a prop
-    /// and now a resurrected man for the rest of the session. So each step is time-boxed, every
-    /// failure falls forward to Driving, and Done() is the only exit -- called from the
-    /// deadlines, the distance check, the failure paths and the mod unloading.
+    ///   the medic WALKS to the exact spot and heading the clip wants him on (Sync.Mark), and
+    ///   joins a scene that has been held paused for him;
     ///
-    /// AND HE GOES BACK THE WAY HE WAS FOUND. A man they could not save was dead when they
-    /// arrived and is dead when they leave: Done() kills him again if he is still ours, so no
-    /// other mod ever sees a corpse that stood up. A man they saved is handed to the city alive
-    /// with a limp, and from that moment is nobody's but the game's.
+    ///   the body is carried along an arc onto the bed while his pose settles to lying, and only
+    ///   attached once he is exactly where the attachment puts him;
+    ///
+    ///   the trolley is eased through the back doors before it is attached to the van.
+    ///
+    /// EVERY STEP HAS A DEADLINE AND A WAY OUT. A stuck call-out holds two persistent peds, a
+    /// vehicle, a prop and a resurrected man for the rest of the session, so each step is
+    /// time-boxed, every failure falls forward, and Done() is the only exit.
+    ///
+    /// AND HE GOES BACK THE WAY HE WAS FOUND. A man they could not save is dead when they leave:
+    /// Done() kills him again if he is still ours, so no other mod ever meets a corpse that
+    /// stood up. A man they saved is handed to the city alive, with a limp.
     /// </summary>
     internal sealed class Callout
     {
-        /// <summary>One clip in the sequence, and how long it gets.</summary>
         private struct Beat
         {
             public string Clip;
-
-            /// <summary>Looped for Ms, or played once with Ms as the ceiling.</summary>
             public bool Loop;
             public int Ms;
         }
 
-        /// <summary>A one-shot that has not reported finished by this is not going to.</summary>
+        /// <summary>Whether the man being walked to his mark is on it.</summary>
+        private enum Walk { None, Going, There }
+
+        // ---- timings that are the scene's own, not the player's -----------------
+
         private const int OneShotMs = 4500;
-
-        /// <summary>The first look at him, between kneeling and leaning in.</summary>
         private const int FirstLookMs = 2400;
-
-        /// <summary>The look between rounds.</summary>
         private const int BetweenMs = 1800;
-
-        /// <summary>And the last one, before the verdict.</summary>
         private const int LastLookMs = 1100;
-
-        /// <summary>How long the crew back off for before they get back in.</summary>
         private const int FleeMs = 2600;
 
-        /// <summary>Lights, siren, and through the traffic rather than round it.</summary>
+        /// <summary>The longest anybody is given to reach a mark before the scene starts anyway.</summary>
+        private const int MarkMs = 5000;
+
+        /// <summary>How long the body takes to be carried from the medic's arms onto the bed.</summary>
+        private const int CarryMs = 850;
+
+        /// <summary>How long the trolley takes to roll in through the back doors.</summary>
+        private const int RollMs = 1300;
+
+        /// <summary>The beat with him on the canvas before anybody moves.</summary>
+        private const int SettleMs = 500;
+
+        /// <summary>A ceiling on the lift itself; the paired clip normally ends well inside it.</summary>
+        private const int LiftMs = 6000;
+
+        /// <summary>No progress towards the body for this long is a van that is stuck.</summary>
+        private const int StuckMs = 12000;
+
+        /// <summary>Stuck closer than this, the crew get out and walk the rest.</summary>
+        private const float WalkInRange = 70f;
+
+        /// <summary>How many times a stuck van is put back on a road before it is given up on.</summary>
+        private const int MostWarps = 2;
+
         private const int DriveStyle = 786603;
 
         private readonly Settings _cfg;
@@ -131,14 +149,8 @@ namespace CodeThree.Scene
         private int _stepAt;
 
         /// <summary>
-        /// Set by every change of step and consumed by the step that has just started.
-        ///
-        /// THE OBVIOUS VERSION OF THIS IS A BUG AND IT WAS WRITTEN FIRST. Each step has work
-        /// that must happen once, and the tempting test is `now - _stepAt == 0`. It is not
-        /// true: To() is called at the END of the previous step, so by the time the new one
-        /// gets a tick the clock has moved on, and the entry work never runs at all -- except
-        /// on a machine fast enough to fit two ticks in one millisecond, where it runs sometimes.
-        /// A flag has no such opinion about the clock.
+        /// Set by every change of step and consumed by the step that has just started. A flag,
+        /// because `now - _stepAt == 0` is never true: To() runs at the END of the previous step.
         /// </summary>
         private bool _entering;
 
@@ -147,36 +159,71 @@ namespace CodeThree.Scene
         private bool _carrying;
         private bool _bodyInVan;
 
-        /// <summary>The scene every paired clip is played against. Same origin for all of them.</summary>
-        private Sync _scene;
-
-        private Beat[] _beats;
-        private int _beat;
-        private int _beatAt;
-
-        /// <summary>When the last beat finished, so the verdict is held for exactly VerdictMs.</summary>
-        private int _verdictAt;
-
         /// <summary>
-        /// Whether he is currently alive by our hand.
-        ///
-        /// TRUE FROM THE RESURRECTION UNTIL HE IS EITHER HANDED BACK ALIVE OR KILLED AGAIN. It
-        /// is the flag Done() reads to decide whether there is a man who needs putting back the
-        /// way he was found, and it is the only thing standing between "the player drove off
-        /// during the CPR" and "a resurrected stranger stands frozen in the road forever".
+        /// Whether he is currently alive by our hand -- from the resurrection until he is either
+        /// handed back alive or killed again. Done() reads it to decide whether there is a man
+        /// who needs putting back the way he was found.
         /// </summary>
         private bool _ours;
 
-        /// <summary>Whether he is holding the lying-dead pose, which is what the trolley wants.</summary>
-        private bool _posed;
-
-        /// <summary>Whether the ambulance has been wrecked or deleted out from under the scene.</summary>
         private bool _vanLost;
-
-        /// <summary>Whether the second man got his scenario, or is faking it with a clip.</summary>
         private bool _mateBusy;
 
-        /// <summary>Said out loud once per scene, if the player is near enough to care.</summary>
+        private Sync _scene;
+        private Beat[] _beats;
+        private int _beat;
+        private int _beatAt;
+        private int _verdictAt;
+
+        // ---- walking somebody to a mark ----------------------------------------
+
+        private Walk _walk;
+        private int _walkAt;
+        private Vector3 _walkTo;
+
+        // ---- a patient being posed, and checked -------------------------------
+
+        private string _poseDict;
+        private string _poseClip;
+        private float _poseLying;
+        private Vector3 _posePelvis;
+        private float _poseBlend;
+        private float _poseMover;
+        private int _posedAt;
+        private bool _poseCheck;
+
+        /// <summary>
+        /// For each opening pose, which way a body in it lies relative to its root, and where
+        /// its pelvis sits in the root's frame. Measured the first time a pose is used and kept
+        /// for the session, so only the very first scene ever needs a correction.
+        /// </summary>
+        private static readonly Dictionary<string, float> Twist = new Dictionary<string, float>();
+        private static readonly Dictionary<string, Vector3> PelvisAt = new Dictionary<string, Vector3>();
+
+        // ---- the scene's moving parts -----------------------------------------
+
+        private int _sceneAt;
+        private Vector3 _carryFrom;
+        private float _carryFromHeading;
+        private Vector3 _carryTo;
+        private float _carryToHeading;
+        private bool _laid;
+        private int _laidAt;
+        private bool _rolled;
+        private int _boardAt;
+        private Vector3 _stopAt;
+
+        // ---- getting there -----------------------------------------------------
+
+        private float _bestDist;
+        private int _bestAt;
+        private int _warps;
+        private int _reachMs;
+
+        /// <summary>The ambulance's rear, measured once from its model.</summary>
+        private static float _vanRear = float.NaN;
+
+        /// <summary>Said out loud, if the player is near enough to care and has asked for it.</summary>
         public Action<string> Say;
 
         public Callout(Settings cfg, Random rng)
@@ -187,32 +234,23 @@ namespace CodeThree.Scene
             _kit = new Kit();
         }
 
-        /// <summary>Whether a call-out is running at all.</summary>
         public bool Out
         {
             get { return _step != Step.None; }
         }
 
-        /// <summary>Where it is, for anybody who asks across the API.</summary>
         public Vector3 At
         {
             get { return _at; }
         }
 
-        /// <summary>
-        /// Whether the crew are still at this scene.
-        ///
-        /// WHAT THE POLICE WAIT ON. Five0 Patrol keeps its officers at a body until the
-        /// ambulance has gone, and it asks this to find out. It goes false the moment the van
-        /// pulls away rather than when it despawns.
-        /// </summary>
+        /// <summary>What the police wait on: whether the crew are still at this scene.</summary>
         public bool Still(Vector3 where)
         {
             return _step != Step.None && _step != Step.Driving &&
                    _at.DistanceTo(where) < _cfg.SameScene;
         }
 
-        /// <summary>Whether the man at this scene was one they could have had.</summary>
         public bool Workable
         {
             get { return _step != Step.None && _verdict == Verdict.Workable; }
@@ -220,8 +258,14 @@ namespace CodeThree.Scene
 
         // ---- the call ----------------------------------------------------------
 
-        /// <summary>Sends one. Whether it went.</summary>
-        public bool Send(Death death)
+        /// <summary>
+        /// Sends one. Whether it went.
+        ///
+        /// The two optional arguments exist for the test call-out on the settings screen: a
+        /// verdict that overrides what killed him, and a shorter distance to come in from, so a
+        /// scene can be watched in ten seconds instead of a murder and a two-minute wait.
+        /// </summary>
+        public bool Send(Death death, Verdict? force = null, float comeFrom = -1f)
         {
             if (Out) return false;
             if (death == null || !Crew.There(death.Body)) return false;
@@ -230,8 +274,11 @@ namespace CodeThree.Scene
             {
                 var where = death.Body.Position;
 
+                var near = comeFrom > 0f;
+
                 Vector3 from;
-                if (!Crew.Road(where, _rng, _cfg.ComeFrom, _cfg.ComeSpread, out from))
+                if (!Crew.Road(where, _rng, near ? comeFrom : _cfg.ComeFrom,
+                               near ? 15f : _cfg.ComeSpread, out from))
                 {
                     Log.Debug("No road to send an ambulance in from.");
                     return false;
@@ -240,18 +287,19 @@ namespace CodeThree.Scene
                 var model = Crew.Load(Crew.Van);
                 if (model == null) { Log.Debug("The ambulance model would not load."); return false; }
 
-                _van = World.CreateVehicle(model.Value, from, 0f);
+                _van = World.CreateVehicle(model.Value, from, Motion.HeadingOf(Motion.Flat(where - from)));
                 model.Value.MarkAsNoLongerNeeded();
 
                 if (!Crew.Alive(_van)) { Done(); return false; }
 
-                _van.IsPersistent = true;
+                // HELD AS A MISSION ENTITY, not merely persistent. The van was being deleted out
+                // from under scenes -- mostly by the trolley launching it, which is fixed in the
+                // Gurney, but a van the population manager is allowed to reclaim is a van the
+                // next streaming hitch can take.
+                Crew.Hold(_van);
                 _van.IsEngineRunning = true;
 
                 Function.Call(Hash.SET_VEHICLE_ON_GROUND_PROPERLY, _van.Handle);
-
-                // LIGHTS AND SIREN THE WHOLE WAY. An ambulance has nothing to find out: it has
-                // been told there is a body, and it is late.
                 Function.Call(Hash.SET_VEHICLE_LIGHTS, _van.Handle, 2);
                 Function.Call(Hash.SET_VEHICLE_SIREN, _van.Handle, true);
 
@@ -260,28 +308,22 @@ namespace CodeThree.Scene
 
                 _mate = Crew.Aboard(_van, 0);
 
-                // THE TROLLEY IS ASKED FOR NOW AND USED IN A MINUTE. Loading a model yields,
-                // and a yield in the middle of the scene is the window the engine used to
-                // reclaim the patient through. Requested here, it is in memory long before
-                // anybody reaches for it and Bring never has to wait. See Gurney.Preload.
+                // EVERYTHING THE SCENE WILL LOAD, ASKED FOR NOW. A load mid-scene yields, and a
+                // yield with a freshly resurrected man in it is a man standing up for as long as
+                // the disk takes. By the time the van arrives it is all in memory.
                 _trolley.Preload();
+                Anim.Preload(Anim.Scene);
 
                 _body = death.Body;
                 _at = where;
 
-                // HELD FROM HERE. The engine tidies corpses away on its own schedule, and a
-                // van that takes a minute to arrive was, before, arriving at nothing about one
-                // time in five -- the log said "the body had gone" and nobody could say why.
-                // It is ours now, and Done() gives it back.
                 Crew.Hold(_body);
 
-                // READ NOW, NOT AT THE SCENE. GET_PED_CAUSE_OF_DEATH is filled in when the ped
-                // dies and there is no promise about how long it stays useful -- and once he
-                // has been resurrected it is gone for good. The verdict is a fact about the
-                // death, so it is taken at the death.
+                // READ NOW, NOT AT THE SCENE. Once he has been resurrected the cause is gone.
                 _verdict = Cause.Read(_body, out _weapon);
 
                 if (!_cfg.Resuscitate) _verdict = Verdict.Gone;
+                if (force.HasValue) _verdict = force.Value;
 
                 _step = Step.Coming;
                 _stepAt = Game.GameTime;
@@ -289,17 +331,16 @@ namespace CodeThree.Scene
                 _carrying = false;
                 _bodyInVan = false;
                 _ours = false;
-                _posed = false;
                 _mateBusy = false;
                 _vanLost = false;
+                _walk = Walk.None;
+                _poseCheck = false;
 
-                Function.Call(Hash.TASK_VEHICLE_DRIVE_TO_COORD_LONGRANGE,
-                              _driver.Handle, _van.Handle,
-                              where.X, where.Y, where.Z,
-                              _cfg.Speed, DriveStyle, _cfg.ThereRange * 0.6f);
+                Drive(_at, _cfg.ThereRange * 0.6f);
 
                 Log.Info("An ambulance was called to a body -- " + Cause.Word(_weapon) +
-                         ", " + (_verdict == Verdict.Workable ? "workable" : "gone") + ".");
+                         ", " + (_verdict == Verdict.Workable ? "workable" : "gone") +
+                         (force.HasValue ? " (a test)" : "") + ".");
 
                 return true;
             }
@@ -308,6 +349,20 @@ namespace CodeThree.Scene
                 Log.Debug("Could not send an ambulance: " + ex.Message);
                 Done();
                 return false;
+            }
+        }
+
+        private void Drive(Vector3 to, float stopWithin)
+        {
+            try
+            {
+                Function.Call(Hash.TASK_VEHICLE_DRIVE_TO_COORD_LONGRANGE,
+                              _driver.Handle, _van.Handle, to.X, to.Y, to.Z,
+                              _cfg.Speed, DriveStyle, stopWithin);
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not give the driver his route: " + ex.Message);
             }
         }
 
@@ -321,8 +376,6 @@ namespace CodeThree.Scene
 
             try
             {
-                // THE DRIVER IS THE SCENE. He is the one kneeling, and there is no version of
-                // the call-out that carries on without him.
                 if (!Crew.Alive(_driver))
                 {
                     Log.Info("The call-out ended: the driver was lost.");
@@ -330,12 +383,8 @@ namespace CodeThree.Scene
                     return;
                 }
 
-                // THE VAN IS NOT. This used to end the call-out the instant the ambulance was
-                // wrecked, and the first scene that ever got as far as compressions ended that
-                // way -- one second in, with the player's crashed car burning next to the van.
-                // Medics do not stop working on a man because their vehicle took damage. So a
-                // lost van is noted once, with how it was lost, and the scene carries on; only
-                // the steps that need somewhere to put him give up, and they give up on foot.
+                // THE VAN IS NOT THE SCENE. A lost van is noted once and the scene carries on;
+                // only the steps that need somewhere to put him give up.
                 if (!Crew.Alive(_van))
                 {
                     if (!_vanLost)
@@ -345,20 +394,19 @@ namespace CodeThree.Scene
                                  ". The crew carry on without it.");
                     }
 
-                    if (_step == Step.Coming || _step >= Step.Fetching) { OnFoot(now, "there is no van to put him in"); return; }
+                    if (_step == Step.Coming || _step >= Step.Fetching)
+                    {
+                        OnFoot("there is no van to put him in");
+                        return;
+                    }
                 }
 
                 var me = Game.Player.Character;
+                var anchor = Crew.Alive(_van) ? _van.Position : _at;
 
-                // GONE FROM THE WORLD RATHER THAN FROM THE SCENE. A call-out the player has
-                // driven three streets away from is not worth a tick, and holding a van, two
-                // crew, a trolley and a resurrected man persistent out there is exactly the leak
-                // this set keeps finding in its own mods.
-                if (me != null && me.Exists() &&
-                    _van.Position.DistanceTo(me.Position) > _cfg.LetGoRange)
+                if (me != null && me.Exists() && anchor.DistanceTo(me.Position) > _cfg.LetGoRange)
                 {
-                    Log.Info("The call-out ended: you were " +
-                             (int)_van.Position.DistanceTo(me.Position) + "m away.");
+                    Log.Info("The call-out ended: you were " + (int)anchor.DistanceTo(me.Position) + "m away.");
                     Done();
                     return;
                 }
@@ -381,7 +429,7 @@ namespace CodeThree.Scene
             }
             catch (Exception ex)
             {
-                Log.Debug("The call-out went wrong: " + ex.Message);
+                Log.Warn("The call-out went wrong in " + _step + ": " + ex.Message);
                 Done();
             }
         }
@@ -391,6 +439,7 @@ namespace CodeThree.Scene
             _step = step;
             _stepAt = now;
             _entering = true;
+            _walk = Walk.None;
         }
 
         private bool Entering()
@@ -403,23 +452,106 @@ namespace CodeThree.Scene
 
         // ---- on the way --------------------------------------------------------
 
+        /// <summary>
+        /// Driving in, and not giving up on the first dead end.
+        ///
+        /// THIRTY-EIGHT CALL-OUTS ENDED "IT COULD NOT GET THERE". A van pathing across a city
+        /// finds a jammed junction, a kerb it will not mount, a body on a footbridge -- and the
+        /// old rule was simply a hundred-second clock, after which it drove off. So the scene
+        /// never happened a third of the time, and from the street that looks like the mod not
+        /// working at all.
+        ///
+        /// NOW PROGRESS IS WATCHED, NOT TIME. No metre gained in twelve seconds is a van that is
+        /// stuck. Close enough to walk, the crew get out and walk the rest -- which is what a
+        /// real crew does. Too far, the van is put back on a road forty-odd metres from the body
+        /// and tries again, out of the player's sight, at most twice.
+        /// </summary>
         private void Coming(int now)
         {
-            if (_van.Position.DistanceTo(_at) > _cfg.ThereRange)
+            if (Entering())
             {
-                if (now - _stepAt > _cfg.ComeMs) { Leave(now, "it could not get there"); }
-                return;
+                _bestDist = float.MaxValue;
+                _bestAt = now;
+                _warps = 0;
             }
 
-            // THE SIREN GOES OFF ON ARRIVAL AND THE LIGHTS STAY ON. The noise is for the traffic
-            // on the way, and the lights are for the street it is parked in.
+            var d = _van.Position.DistanceTo(_at);
+
+            if (d <= _cfg.ThereRange) { Arrive(now, d); return; }
+
+            if (d < _bestDist - 3f)
+            {
+                _bestDist = d;
+                _bestAt = now;
+            }
+
+            if (now - _bestAt > StuckMs)
+            {
+                if (d < WalkInRange)
+                {
+                    Log.Info("The van is stuck " + (int)d + "m out; the crew walk the rest.");
+                    Arrive(now, d);
+                    return;
+                }
+
+                if (_warps < MostWarps && Unstick())
+                {
+                    _warps++;
+                    _bestDist = float.MaxValue;
+                }
+
+                _bestAt = now;
+            }
+
+            if (now - _stepAt > _cfg.ComeMs) Leave(now, "it could not get there");
+        }
+
+        /// <summary>A stuck van put back on a road near the body, somewhere the player is not looking.</summary>
+        private bool Unstick()
+        {
+            try
+            {
+                var me = Game.Player.Character;
+
+                for (var attempt = 0; attempt < 6; attempt++)
+                {
+                    Vector3 spot;
+                    if (!Crew.Road(_at, _rng, 45f, 25f, out spot)) continue;
+
+                    if (me != null && me.Exists() && spot.DistanceTo(me.Position) < 40f) continue;
+
+                    Function.Call(Hash.SET_ENTITY_COORDS, _van.Handle, spot.X, spot.Y, spot.Z,
+                                  false, false, false, false);
+
+                    _van.Heading = Motion.HeadingOf(Motion.Flat(_at - spot));
+
+                    Function.Call(Hash.SET_VEHICLE_ON_GROUND_PROPERLY, _van.Handle);
+
+                    Drive(_at, _cfg.ThereRange * 0.6f);
+
+                    Log.Info("The van was stuck; it was put back on a road " +
+                             (int)spot.DistanceTo(_at) + "m out.");
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not unstick the van: " + ex.Message);
+            }
+
+            return false;
+        }
+
+        private void Arrive(int now, float distance)
+        {
             Function.Call(Hash.SET_VEHICLE_SIREN, _van.Handle, false);
+
+            // THE WALK IS GIVEN TIME FOR ITS DISTANCE. ReachMs was written for a van parked in
+            // the next bay; a crew walking in from seventy metres needs longer than that.
+            _reachMs = Math.Max(_cfg.ReachMs, (int)(distance / 2.5f * 1000f) + 4000);
 
             Out_(_driver, 1.4f);
 
-            // THE SECOND MAN BRINGS THE BAG, and goes to the other side of him. Two men
-            // walking to the same point from the same door arrive standing in each other, and
-            // the scene that follows puts one of them kneeling exactly where the other one was.
             if (_cfg.MedicBag) _kit.Bring(_mate);
 
             Out_(_mate, 2.2f, Flank());
@@ -431,7 +563,6 @@ namespace CodeThree.Scene
             if (Say != null && Near()) Say("An ambulance pulls up.");
         }
 
-        /// <summary>One of them out and over to him, or to a spot near him.</summary>
         private void Out_(Ped who, float stopAt, Vector3? spot = null)
         {
             if (!Crew.Alive(who)) return;
@@ -445,19 +576,19 @@ namespace CodeThree.Scene
                     var s = spot.Value;
 
                     Function.Call(Hash.TASK_GO_STRAIGHT_TO_COORD, who.Handle,
-                                  s.X, s.Y, s.Z, 1.8f, _cfg.ReachMs, 0f, 0.4f);
+                                  s.X, s.Y, s.Z, 1.8f, _reachMs, 0f, 0.4f);
                     return;
                 }
 
                 if (Crew.There(_body))
                 {
                     Function.Call(Hash.TASK_GO_TO_ENTITY, who.Handle, _body.Handle,
-                                  _cfg.ReachMs, stopAt, 2f, 1073741824f, 0);
+                                  _reachMs, stopAt, 2f, 1073741824f, 0);
                     return;
                 }
 
                 Function.Call(Hash.TASK_GO_STRAIGHT_TO_COORD, who.Handle,
-                              _at.X, _at.Y, _at.Z, 1.8f, _cfg.ReachMs, 0f, 0.5f);
+                              _at.X, _at.Y, _at.Z, 1.8f, _reachMs, 0f, 0.5f);
             }
             catch (Exception ex)
             {
@@ -465,13 +596,7 @@ namespace CodeThree.Scene
             }
         }
 
-        /// <summary>
-        /// A spot beside the body, square to the way the van came in.
-        ///
-        /// The driver walks straight at him from the van, so "square to the van" is the side
-        /// the driver is not on. Falls back to the body itself when there is no van to measure
-        /// from, which only happens on the way to Done anyway.
-        /// </summary>
+        /// <summary>A spot beside the body, square to the way the van came in.</summary>
         private Vector3 Flank()
         {
             try
@@ -479,17 +604,13 @@ namespace CodeThree.Scene
                 if (!Crew.There(_body) || !Crew.Alive(_van)) return _at;
 
                 var body = _body.Position;
-                var toward = body - _van.Position;
-                toward.Z = 0f;
+                var toward = Motion.Flat(body - _van.Position);
 
                 if (toward.Length() < 0.5f) return body;
 
                 toward = toward.Normalized;
 
-                // Perpendicular, on the ground.
-                var side = new Vector3(-toward.Y, toward.X, 0f);
-
-                return body + side * 1.7f;
+                return body + new Vector3(-toward.Y, toward.X, 0f) * 1.7f;
             }
             catch
             {
@@ -501,29 +622,187 @@ namespace CodeThree.Scene
 
         private void Reaching(int now)
         {
-            // THE BODY CAN GO AWAY MID-SCENE and it is not an error. Five0 Patrol drags corpses
-            // out of sight and Hoodrich searches them; either way there is nothing left to work
-            // on, and the crew get back in.
             if (!Crew.There(_body)) { Leave(now, "the body had gone"); return; }
 
             var close = Crew.Alive(_driver) &&
                         _driver.Position.DistanceTo(_body.Position) < _cfg.KneelRange;
 
-            if (!close && now - _stepAt < _cfg.ReachMs) return;
+            if (!close && now - _stepAt < _reachMs) return;
 
             To(Step.Working, now);
         }
 
-        // ---- the scene ---------------------------------------------------------
+        // ---- marks and poses ----------------------------------------------------
+
+        /// <summary>
+        /// Walks a man to the exact spot and heading a clip wants him on.
+        ///
+        /// THE MEDIC IS NEVER SNAPPED ONTO HIS MARK. Sync.Mark asks the engine where the clip
+        /// starts him, and he walks there and turns to face the right way; only then is he cast
+        /// into the scene, and the few centimetres the walk left over are taken up by the mover
+        /// blend. A mark the engine will not give is treated as already reached, which is the
+        /// old behaviour -- a snap -- and no worse than it.
+        /// </summary>
+        private void Approach(Ped who, Sync scene, string dict, string clip, int now)
+        {
+            _walk = Walk.Going;
+            _walkAt = now;
+
+            Vector3 at;
+            float heading;
+
+            if (!Crew.Alive(who) || scene == null || !scene.Mark(dict, clip, 0f, out at, out heading))
+            {
+                _walk = Walk.There;
+                return;
+            }
+
+            _walkTo = at;
+
+            try
+            {
+                Function.Call(Hash.CLEAR_PED_TASKS, who.Handle);
+                Function.Call(Hash.TASK_GO_STRAIGHT_TO_COORD, who.Handle,
+                              at.X, at.Y, Crew.Ground(at, at.Z), 1f, MarkMs, heading, 0.5f);
+            }
+            catch
+            {
+                _walk = Walk.There;
+            }
+        }
+
+        private bool Approached(Ped who, int now)
+        {
+            if (_walk == Walk.There) return true;
+            if (_walk != Walk.Going) return false;
+
+            if (!Crew.Alive(who) ||
+                Motion.FlatDistance(who.Position, _walkTo) < 0.3f ||
+                now - _walkAt > MarkMs)
+            {
+                _walk = Walk.There;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Puts the patient into the opening pose of a clip, held still, lying the way he lies.
+        ///
+        /// THE BODY USED TO FLIP ROUND WHEN THE MEDIC KNELT. A resurrected ped is posed from its
+        /// capsule's heading, and a ragdoll's capsule heading is whatever he was facing when he
+        /// was hit -- nothing to do with which way he fell. So a man lying head-north snapped to
+        /// lying head-east the instant the CPR began.
+        ///
+        /// Now his bones are read first: which way his pelvis-to-head line points and where his
+        /// pelvis is. The scene is then anchored so the POSE's pelvis lands on his and the pose
+        /// lies along his line. How a given pose lies relative to its own root is not in any
+        /// file, so the first time a pose is used it is measured off the posed skeleton a
+        /// moment later and remembered -- see CheckPose -- and every later scene gets it right
+        /// from the first frame.
+        /// </summary>
+        private void Pose(string dict, string clip, float lying, Vector3 pelvis,
+                          float blend, float mover, int now)
+        {
+            _poseDict = dict;
+            _poseClip = clip;
+            _poseLying = lying;
+            _posePelvis = pelvis;
+            _poseBlend = blend;
+            _poseMover = mover;
+
+            PoseNow();
+
+            _posedAt = now;
+            _poseCheck = !Twist.ContainsKey(clip) && !float.IsNaN(lying) && pelvis != Vector3.Zero;
+        }
+
+        private void PoseNow()
+        {
+            if (!Crew.Alive(_body)) return;
+
+            float twist;
+            Vector3 local;
+
+            if (!Twist.TryGetValue(_poseClip, out twist)) twist = 0f;
+            if (!PelvisAt.TryGetValue(_poseClip, out local)) local = Vector3.Zero;
+
+            var heading = float.IsNaN(_poseLying) ? _body.Heading : _poseLying - twist;
+
+            var root = _body.Position;
+
+            if (_posePelvis != Vector3.Zero)
+            {
+                var p = _posePelvis - Motion.Rotate(local, heading);
+                root = new Vector3(p.X, p.Y, root.Z);
+            }
+
+            root.Z = Crew.Ground(root, root.Z);
+
+            _scene = Sync.Anchored(_poseDict, _poseClip, root, heading);
+
+            if (_scene.Begin(false, true) &&
+                _scene.Cast(_body, _poseDict, _poseClip, _poseBlend, _poseMover))
+            {
+                _scene.Rate(0f);
+            }
+            else
+            {
+                Log.Warn("Could not pose him for " + _poseClip + ".");
+            }
+        }
+
+        /// <summary>
+        /// The pose, measured off his skeleton once it has settled, and put right if it is off.
+        ///
+        /// Waits for the blend: a skeleton read half way through a half-second blend is half the
+        /// old pose, and would teach the cache the wrong answer for the whole session.
+        /// </summary>
+        private void CheckPose(int now)
+        {
+            if (!_poseCheck) return;
+
+            var wait = Math.Max(80, (int)(1000f / Math.Max(0.5f, _poseBlend)) + 80);
+            if (now - _posedAt < wait) return;
+
+            _poseCheck = false;
+
+            try
+            {
+                var lyingNow = Crew.Lying(_body);
+
+                Vector3 pelvisNow;
+                if (float.IsNaN(lyingNow) || !Crew.Pelvis(_body, out pelvisNow)) return;
+
+                var root = _body.Position;
+                var heading = _body.Heading;
+
+                Twist[_poseClip] = Motion.Wrap(lyingNow - heading);
+                PelvisAt[_poseClip] = Motion.Rotate(Motion.Flat(pelvisNow - root), -heading);
+
+                var turned = Math.Abs(Motion.Wrap(lyingNow - _poseLying));
+                var moved = Motion.FlatDistance(pelvisNow, _posePelvis);
+
+                Log.Debug("Measured " + _poseClip + ": off by " + turned.ToString("0") + " degrees and " +
+                          moved.ToString("0.00") + "m" + (turned > 12f || moved > 0.25f ? "; re-placed." : "."));
+
+                if (turned > 12f || moved > 0.25f) PoseNow();
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not measure the pose: " + ex.Message);
+            }
+        }
+
+        // ---- the CPR -----------------------------------------------------------
 
         private void Working(int now)
         {
             if (Entering())
             {
-                if (!Arrest())
+                if (!Arrest(now))
                 {
-                    // He would not come back into the engine's idea of alive. Nothing to be
-                    // done but what 0.1.0 did: call it, and load him as he lies.
                     Log.Info("He could not be brought into arrest; treating him as gone.");
                     _verdict = Verdict.Gone;
                     To(Step.Pronounce, now);
@@ -534,18 +813,9 @@ namespace CodeThree.Scene
                 Mate_();
 
                 _beat = -1;
-                Advance(now);
                 return;
             }
 
-            // SHOT UNDER THEIR HANDS. He is alive during this, so the player can kill him
-            // again -- and if they do, the crew do what the scenario's own exit was authored
-            // for, which is to get away from whoever did it.
-            //
-            // AND IT SAYS WHEN. A death in the first second of the scene is not a shooting, it
-            // is something wrong with the resurrection, and the log needs to be able to tell
-            // the two apart -- that is exactly the distinction that would have found the health
-            // bug on the first evening instead of the seventh.
             if (!Crew.Alive(_body))
             {
                 Log.Warn("The patient died " + ((now - _stepAt) / 1000f).ToString("0.0") +
@@ -556,7 +826,26 @@ namespace CodeThree.Scene
 
             if (!_mateBusy) Look(_mate);
 
-            // Past the last beat: the verdict is on screen, held. Give it its moment.
+            // STILL SETTING UP: the patient posed and held, the medic walking to his mark.
+            if (_beat < 0)
+            {
+                CheckPose(now);
+
+                if (_poseCheck) return;
+
+                if (_walk == Walk.None) { Approach(_driver, _scene, Anim.CprMedic, Anim.Kneel, now); return; }
+
+                if (!Approached(_driver, now)) return;
+
+                // On his mark. Into the scene the patient is already holding, and it starts.
+                _scene.Cast(_driver, Anim.CprMedic, Anim.Kneel);
+                _scene.Rate(1f);
+
+                _beat = 0;
+                _beatAt = now;
+                return;
+            }
+
             if (_beat >= _beats.Length)
             {
                 if (now - _verdictAt < _cfg.VerdictMs) return;
@@ -573,36 +862,33 @@ namespace CodeThree.Scene
         }
 
         /// <summary>
-        /// Brought back, into arrest.
+        /// Brought back, into arrest, and posed exactly where and how he fell.
         ///
-        /// RESURRECT_PED LEAVES A PED BLANK -- Hoodrich's lesson, in Hoodrich's words: no flags,
-        /// out of whatever group it was in, none of what made it a person in a street. Here
-        /// that is a feature. What goes back on is exactly the set that makes him a patient:
-        /// nothing can target him, nothing he sees can move him, he cannot fall over, and he
-        /// has just enough health that being knocked by a passing car will not end the scene.
+        /// HIS BONES ARE READ WHILE HE IS STILL A RAGDOLL, because the moment he is resurrected
+        /// they are wherever the capsule puts them. The dictionaries are made ready BEFORE the
+        /// resurrection for the same reason: a man with no task stands up, and a load that
+        /// yields with him in that state is a corpse standing up on camera.
         ///
-        /// THE SCENE ORIGIN IS TAKEN HERE, ON THE GROUND UNDER HIM. A ragdoll's position is
-        /// somewhere in its pelvis, which on a kerb is a hand's width above the road, and a
-        /// scene rooted there plays a hand's width above the road. GetGroundHeight is asked
-        /// from a little way up so it finds the road and not the inside of him.
+        /// RESURRECT_PED LEAVES A PED BLANK -- no flags, out of his group, not held. What goes
+        /// back on is exactly what makes him a patient: nothing can target him, nothing he sees
+        /// moves him, he cannot fall, he is held, and he has a third of the bar -- never a third
+        /// of the NUMBER, which is under a hundred and therefore dead. See Crew.Floor.
         /// </summary>
-        private bool Arrest()
+        private bool Arrest(int now)
         {
             if (!Crew.There(_body)) return false;
 
             try
             {
-                var h = _body.Handle;
-                var where = _body.Position;
-                var heading = _body.Heading;
+                var lying = Crew.Lying(_body);
 
-                float ground;
-                if (World.GetGroundHeight(where + new Vector3(0f, 0f, 1f), out ground,
-                                          GetGroundHeightMode.Normal) &&
-                    Math.Abs(ground - where.Z) < 3f)
-                {
-                    where.Z = ground;
-                }
+                Vector3 pelvis;
+                if (!Crew.Pelvis(_body, out pelvis)) pelvis = Vector3.Zero;
+
+                Anim.Ready(Anim.CprVictim);
+                Anim.Ready(Anim.CprMedic);
+
+                var h = _body.Handle;
 
                 Function.Call(Hash.RESURRECT_PED, h);
 
@@ -610,11 +896,6 @@ namespace CodeThree.Scene
 
                 Function.Call(Hash.CLEAR_PED_TASKS_IMMEDIATELY, h);
 
-                // A THIRD OF THE BAR, NOT A THIRD OF THE NUMBER. See Crew.Floor for the bug this
-                // replaces: 40 out of 200 is not a badly hurt man, it is a dead one, and the
-                // engine made him one on the next tick every time. A third of what is actually
-                // his to lose leaves him takeable by a couple of deliberate shots -- which is the
-                // beat Fleeing exists for -- and not by a passing wing mirror.
                 Crew.Hurt(_body, 0.33f);
 
                 Function.Call(Hash.SET_PED_CAN_RAGDOLL, h, false);
@@ -622,17 +903,14 @@ namespace CodeThree.Scene
                 Function.Call(Hash.SET_PED_CAN_BE_TARGETTED, h, false);
                 Function.Call(Hash.SET_PED_FLEE_ATTRIBUTES, h, 0, false);
 
-                // AND HELD AGAIN, BECAUSE RESURRECT_PED JUST THREW THE HOLD AWAY. This is the
-                // line the whole disappearing-body bug came down to: he was marked persistent
-                // at dispatch, and a resurrected ped comes back blank -- Hoodrich's note says
-                // so in those words. From here until Done he is an ordinary ambient ped unless
-                // somebody says otherwise, and the next model load would reclaim him.
                 Crew.Hold(_body);
 
                 _ours = true;
-                _posed = false;
 
-                _scene = new Sync(where, heading);
+                // SNAPPED, THIS ONCE, AND ON PURPOSE. A ragdoll becoming a posed patient has to
+                // change in a single frame, because the only thing it could blend FROM is the
+                // standing idle a resurrected ped wakes up in.
+                Pose(Anim.CprVictim, Anim.Kneel, lying, pelvis, Sync.Snap, Sync.Snap, now);
 
                 return true;
             }
@@ -644,13 +922,8 @@ namespace CodeThree.Scene
         }
 
         /// <summary>
-        /// The order of the clips, and how long each one gets.
-        ///
-        /// TWO ROUNDS FOR A MAN WITH A CHANCE, ONE FOR A MAN WITHOUT. That is what makes the two
-        /// outcomes read differently before either ending has played: a crew that keeps going
-        /// back to his chest is a crew that thinks there is something there. The compressions
-        /// take the ini's WorkMs and CheckMs -- the numbers that already existed -- split across
-        /// the rounds, so nobody's tuning is thrown away.
+        /// The order of the clips. Two rounds for a man with a chance, one for a man without --
+        /// which is what makes the two outcomes read differently before either ending plays.
         /// </summary>
         private void Choreograph()
         {
@@ -701,9 +974,9 @@ namespace CodeThree.Scene
         /// <summary>
         /// The next clip, on both of them, against a fresh scene at the same origin.
         ///
-        /// THE LAST BEAT IS HELD. cpr_success leaves him sat up and cpr_fail leaves the medic
-        /// sat back; both are the picture the verdict is judged from, and a scene that snapped
-        /// to idle the frame it ended would throw that picture away before anybody saw it.
+        /// EVERY ONE-SHOT HOLDS ITS LAST FRAME, not just the final one. A one-shot that let go at
+        /// its end dropped the medic into a standing idle for the tick before the next clip took
+        /// over -- a man bolt upright for a frame in the middle of a resuscitation.
         /// </summary>
         private void Advance(int now)
         {
@@ -717,15 +990,11 @@ namespace CodeThree.Scene
             }
 
             var beat = _beats[_beat];
-            var last = _beat == _beats.Length - 1;
 
             _scene.End();
 
-            if (!_scene.Begin(beat.Loop, last))
+            if (!_scene.Begin(beat.Loop, !beat.Loop))
             {
-                // WARN, NOT DEBUG. These two lines are the difference between a log that says
-                // why the crew stood there and one that does not, and the whole week the health
-                // bug went unnoticed was a week of the log running at Info.
                 Log.Warn("The scene would not start for " + beat.Clip + ".");
                 return;
             }
@@ -741,15 +1010,9 @@ namespace CodeThree.Scene
         }
 
         /// <summary>
-        /// Whether the current beat has run its course.
-        ///
-        /// A LOOP IS DONE WHEN ITS TIME IS UP. A one-shot is done when the scene says so -- with
-        /// two guards, because the scene's own answer is not to be trusted on the first frame or
-        /// the last. It takes a tick for the task to register, during which the scene reports
-        /// "not running", which Sync reads as finished; so nothing under two hundred
-        /// milliseconds counts. And a scene that never started at all reports the same thing
-        /// forever; so anything not running after a second is taken as over, and anything at
-        /// all is taken as over at the ceiling.
+        /// Whether the current beat has run its course. A loop is done when its time is up; a
+        /// one-shot when the scene says so, not trusted on the first frame, and not waited on
+        /// past its ceiling.
         /// </summary>
         private bool BeatDone(int now)
         {
@@ -768,14 +1031,7 @@ namespace CodeThree.Scene
             return age > beat.Ms;
         }
 
-        /// <summary>
-        /// The second man: bag down beside him, then kneeling, tending, on the far side.
-        ///
-        /// THE GAME'S OWN SCENARIO RATHER THAN A CLIP. It runs enter, a base loop and idle
-        /// variations of its own accord, which is a man who is doing something rather than a
-        /// man holding a pose -- and it is the exact thing the vanilla paramedics play at a
-        /// body, so it is the texture this mod is meant to be finishing rather than replacing.
-        /// </summary>
+        /// <summary>The second man: bag down beside him, then kneeling, tending, on the far side.</summary>
         private void Mate_()
         {
             if (!Crew.Alive(_mate) || !Crew.There(_body)) return;
@@ -785,10 +1041,7 @@ namespace CodeThree.Scene
                 if (_kit.There) _kit.SetDown(Flank() + (_at - Flank()).Normalized * 0.9f);
 
                 var at = _body.Position - _mate.Position;
-                if (at.Length() > 0.2f)
-                {
-                    _mate.Heading = (float)(Math.Atan2(at.Y, at.X) * 180d / Math.PI) - 90f;
-                }
+                if (at.Length() > 0.2f) _mate.Heading = Motion.HeadingOf(at);
 
                 _mateBusy = Anim.Scenario(_mate, Anim.TendScenario);
             }
@@ -799,7 +1052,6 @@ namespace CodeThree.Scene
             }
         }
 
-        /// <summary>The fallback for a man with nothing to do: kneel and look.</summary>
         private void Look(Ped who)
         {
             if (!Crew.Alive(who) || !Crew.There(_body)) return;
@@ -818,33 +1070,58 @@ namespace CodeThree.Scene
 
         // ---- he comes round ----------------------------------------------------
 
+        /// <summary>
+        /// Hauled to his feet: the patient anchors the scene where he is sitting, the medic
+        /// walks to his mark, and it runs.
+        /// </summary>
         private void Rising(int now)
         {
             if (Entering())
             {
-                _scene.End();
-
-                var paired = _scene.Begin(false, false) &&
-                             _scene.Cast(_driver, Anim.Rescue, Anim.RescueMedic) &&
-                             _scene.Cast(_body, Anim.Rescue, Anim.RescueVictim);
-
-                if (!paired)
-                {
-                    // On his own, then. The medic simply stands.
-                    Log.Debug("The helping-up scene would not start; he gets up himself.");
-                    Function.Call(Hash.CLEAR_PED_TASKS, _driver.Handle);
-                    Anim.Play(_body, Anim.GetUpDict, Anim.GetUpClip, 0);
-                }
-
                 Log.Info("He came round -- it was " + Cause.Word(_weapon) + ".");
 
                 if (Say != null && Near()) Say("They bring him round.");
+
+                _scene.End();
+                _sceneAt = 0;
+
+                // SAT UP, SO THERE IS NO LYING DIRECTION TO MATCH -- Crew.Lying says as much --
+                // and the anchor is simply his root. The pose blend is a quarter second: he is
+                // already sitting, and the new clip starts sitting.
+                _scene = Sync.Anchored(Anim.Rescue, Anim.RescueVictim, _body.Position, _body.Heading);
+
+                var ok = _scene.Begin(false, true) &&
+                         _scene.Cast(_body, Anim.Rescue, Anim.RescueVictim, 4f, Sync.Settle);
+
+                if (!ok)
+                {
+                    Log.Debug("The helping-up scene would not start; he gets up himself.");
+                    Function.Call(Hash.CLEAR_PED_TASKS, _driver.Handle);
+                    Anim.Play(_body, Anim.GetUpDict, Anim.GetUpClip, 0);
+                    _walk = Walk.There;
+                    _sceneAt = now;
+                    return;
+                }
+
+                _scene.Rate(0f);
+
+                Approach(_driver, _scene, Anim.Rescue, Anim.RescueMedic, now);
                 return;
             }
 
             if (!Crew.Alive(_body)) { To(Step.Fleeing, now); return; }
 
-            var age = now - _stepAt;
+            if (_sceneAt == 0)
+            {
+                if (!Approached(_driver, now)) return;
+
+                _scene.Cast(_driver, Anim.Rescue, Anim.RescueMedic);
+                _scene.Rate(1f);
+                _sceneAt = now;
+                return;
+            }
+
+            var age = now - _sceneAt;
 
             if (age < 300) return;
 
@@ -857,17 +1134,7 @@ namespace CodeThree.Scene
             Leave(now, null);
         }
 
-        /// <summary>
-        /// Handed to the city, alive and limping.
-        ///
-        /// EVERYTHING ARREST TOOK OFF HIM GOES BACK ON, then he is nobody's. Holding a man you
-        /// have just saved so you can watch him walk away is how a mod ends up owning forty
-        /// people; he is marked no longer needed and the engine can have him back the moment
-        /// he is out of sight.
-        ///
-        /// NOT BACK TO FULL. A third of a bar is enough to walk off and it means a second beating
-        /// finishes him -- which is the honest consequence of having been dead a minute ago.
-        /// </summary>
+        /// <summary>Handed to the city, alive, limping, with a third of his bar.</summary>
         private void LetGo()
         {
             try
@@ -878,10 +1145,8 @@ namespace CodeThree.Scene
 
                 Function.Call(Hash.CLEAR_PED_TASKS, h);
 
-                // A third of the bar he can see, which is what "a third of his health" was
-                // always meant to say. The number it replaced -- 66 of 200 -- was under the
-                // floor, and he would have died on the pavement the moment they let go of him.
                 Crew.Hurt(_body, 0.33f);
+                Crew.Solid(_body, true);
 
                 Function.Call(Hash.SET_PED_CAN_RAGDOLL, h, true);
                 Function.Call(Hash.SET_BLOCKING_OF_NON_TEMPORARY_EVENTS, h, false);
@@ -910,61 +1175,52 @@ namespace CodeThree.Scene
 
         // ---- he does not --------------------------------------------------------
 
+        /// <summary>
+        /// Calling it -- and, while the second man writes it down, the patient eased from the
+        /// last frame of the CPR into the opening pose of the lift, where he waits.
+        ///
+        /// HE IS PUT INTO THE LIFT'S POSE HERE, NOT WHEN THE LIFT STARTS. That is what stops the
+        /// lift beginning with him jumping into it: by the time the medic reaches his mark, the
+        /// patient has been lying in exactly the pose the lift begins from for several seconds,
+        /// having settled into it over half a second while nobody was touching him.
+        /// </summary>
         private void Pronounce(int now)
         {
             if (Entering())
             {
                 _scene.End();
 
-                // The medic stands. The second man writes it down, or just stands too.
                 Function.Call(Hash.CLEAR_PED_TASKS, _driver.Handle);
 
                 if (_cfg.TimeOfDeath) Anim.Scenario(_mate, Anim.TimeOfDeathScenario);
                 else Unsettle(_mate);
 
-                PoseDead();
+                if (Crew.Alive(_body))
+                {
+                    Vector3 pelvis;
+                    if (!Crew.Pelvis(_body, out pelvis)) pelvis = Vector3.Zero;
+
+                    Pose(Anim.LiftDict, Anim.LiftBody, Crew.Lying(_body), pelvis, 2f, Sync.Settle, now);
+                    Crew.Hold(_body);
+                }
 
                 if (Say != null && Near()) Say("They stop working on him.");
                 return;
             }
 
+            CheckPose(now);
+
             if (now - _stepAt < _cfg.PronounceMs) return;
 
-            // NOT EVERYBODY WANTS THE REST OF IT. With the hospital run switched off the crew do
-            // the one thing this mod was written to stop them doing -- get back in and leave him
-            // there -- and that is a legitimate way to run it: the resuscitation is most of the
-            // value, and the loading is the part that touches other mods' corpses.
             if (!_cfg.TakeToHospital) { Leave(now, "they are not taking him"); return; }
 
-            // Nowhere to put him. They have done what they could.
-            if (_vanLost) { OnFoot(now, "there is no van to put him in"); return; }
+            if (_vanLost) { OnFoot("there is no van to put him in"); return; }
 
             Unsettle(_mate);
 
             To(Step.Fetching, now);
         }
 
-        /// <summary>
-        /// Laid out flat, and kept that way.
-        ///
-        /// THIS IS WHAT MAKES THE TROLLEY WORK. He is alive, so he can be posed; the game ships
-        /// eight lying-dead clips; and a ped keeps playing its clip when it is attached to
-        /// something. So he holds dead_a, the trolley picks him up in that pose, and the
-        /// offsets in the ini are tuned against one shape that never varies -- instead of
-        /// against however each man happened to fall, which is what made them unverifiable.
-        /// </summary>
-        private void PoseDead()
-        {
-            if (!Crew.Alive(_body)) return;
-
-            _posed = Anim.Play(_body, Anim.DeadDict, Anim.DeadPose, Anim.Hold);
-
-            // AND HELD AGAIN. Anim.Play can load a dictionary, and loading yields. Every yield
-            // in this file is a place the patient could be reclaimed if the hold has slipped.
-            Crew.Hold(_body);
-        }
-
-        /// <summary>Out of whatever scenario or clip he was in, and back on his feet.</summary>
         private static void Unsettle(Ped who)
         {
             if (!Crew.Alive(who)) return;
@@ -979,15 +1235,13 @@ namespace CodeThree.Scene
         {
             if (Entering())
             {
-                _scene.End();
+                if (_scene != null) _scene.End();
 
                 Log.Info("The patient was killed with the crew working on him.");
 
                 Anim.Play(_driver, Anim.FleeDict, Anim.FleeClip, 0);
                 Anim.Play(_mate, Anim.FleeDict, Anim.FleeClip, 0);
 
-                // He was ours a moment ago and is dead again now, by somebody else's hand. He is
-                // not ours any more and there is nothing to put back.
                 _ours = false;
 
                 if (Say != null && Near()) Say("The crew back off.");
@@ -1001,6 +1255,15 @@ namespace CodeThree.Scene
 
         // ---- the trolley -------------------------------------------------------
 
+        /// <summary>
+        /// The trolley out and put down -- beside where the lift will LEAVE him.
+        ///
+        /// THE LIFT IS ASKED WHERE IT ENDS BEFORE IT STARTS. Sync.Mark at phase 1 says where the
+        /// clip deposits the patient, and at phase 0 where the medic stands to lift him. The
+        /// trolley goes alongside the deposit spot, parallel to that line, on the van's side --
+        /// so the carry from his arms to the bed is a short step sideways rather than a flight
+        /// across the pavement, and nobody is standing where it appears.
+        /// </summary>
         private void Fetching(int now)
         {
             if (!Crew.There(_body)) { Leave(now, "the body had gone"); return; }
@@ -1009,28 +1272,13 @@ namespace CodeThree.Scene
             {
                 Doors(true);
 
-                // The bag goes back with him, if he brought one.
                 if (_kit.There) _kit.Bring(_mate);
 
-                // CLEAR OF THE CREW, NOT JUST CLEAR OF THE BODY. It used to be put down a metre
-                // towards the van, which is exactly where the driver is standing -- he walked in
-                // from the van and has been kneeling at the man's chest ever since -- so the
-                // trolley materialised through him. That is the paramedic standing inside his
-                // own gurney in the screenshot.
-                //
-                // So it goes out to the SIDE: perpendicular to the line the driver is on, on
-                // whichever side he is not, far enough out that a man can stand between it and
-                // the body to do the lifting.
-                // POINTED AT THE AMBULANCE. Its heading used to be taken off the body, which is
-                // however he happened to fall -- so the trolley was laid out at a random angle
-                // and the man pushing it had to drag it round before he could start. Aimed at
-                // the van, the back of it is where he stands and forward is where he is going.
-                var spot = Alongside();
+                Vector3 spot;
+                float along;
+                Lay_out(out spot, out along);
 
-                if (!_trolley.Bring(spot, Toward(spot, Crew.Alive(_van) ? _van.Position : _at)))
-                {
-                    _carrying = true;
-                }
+                if (!_trolley.Bring(spot, along)) _carrying = true;
             }
 
             if (now - _stepAt < _cfg.FetchMs) return;
@@ -1038,102 +1286,83 @@ namespace CodeThree.Scene
             To(_carrying ? Step.Loading : Step.Lifting, now);
         }
 
-        /// <summary>
-        /// A spot to stand the trolley in: out to one side of the body, away from the driver.
-        ///
-        /// The driver's own approach line is the thing being avoided, because he is the one who
-        /// will be lifting and he is standing on it. Perpendicular to it, on the far side.
-        /// </summary>
-        /// <summary>The heading that points from one spot at another, in degrees.</summary>
-        private static float Toward(Vector3 from, Vector3 to)
+        private void Lay_out(out Vector3 spot, out float along)
         {
-            try
+            Vector3 end;
+            float ignored;
+
+            if (_scene == null || !_scene.Mark(Anim.LiftDict, Anim.LiftBody, 1f, out end, out ignored))
             {
-                var d = to - from;
-
-                if (d.Length() < 0.2f) return 0f;
-
-                return (float)(Math.Atan2(d.Y, d.X) * 180d / Math.PI) - 90f;
+                end = _body.Position;
             }
-            catch
-            {
-                return 0f;
-            }
-        }
 
-        private Vector3 Alongside()
-        {
-            try
-            {
-                if (!Crew.There(_body)) return _at;
+            var stance = Vector3.Zero;
+            var haveStance = _scene != null &&
+                             _scene.Mark(Anim.LiftDict, Anim.LiftMedic, 0f, out stance, out ignored);
 
-                var body = _body.Position;
+            var line = haveStance ? Motion.Flat(end - stance) : Motion.Facing(_body.Heading);
+            if (line.Length() < 0.3f) line = Motion.Facing(_body.Heading);
+            line = line.Normalized;
 
-                var from = Crew.Alive(_driver) ? _driver.Position
-                         : Crew.Alive(_van) ? _van.Position
-                         : body + Vector3.WorldNorth;
+            var toVan = Crew.Alive(_van) ? Motion.Flat(_van.Position - end) : Vector3.Zero;
 
-                var line = body - from;
-                line.Z = 0f;
+            var side = new Vector3(-line.Y, line.X, 0f);
+            if (Vector3.Dot(side, toVan) < 0f) side = -side;
 
-                if (line.Length() < 0.4f) return body + Vector3.WorldEast * 1.4f;
+            // Parallel to the lift line, pointing whichever way is more towards the van -- so
+            // the back of it is where the medic will stand and forward is where he will push.
+            var forward = Vector3.Dot(line, toVan) >= 0f ? line : -line;
 
-                line = line.Normalized;
+            spot = end + side * 0.9f;
+            along = Motion.HeadingOf(forward);
 
-                // Perpendicular, on the ground. Which of the two sides does not matter as long
-                // as it is not the one with a man on it.
-                return body + new Vector3(-line.Y, line.X, 0f) * 1.4f;
-            }
-            catch
-            {
-                return _at;
-            }
+            Log.Debug("Trolley laid out " + Motion.FlatDistance(spot, _body.Position).ToString("0.00") +
+                      "m from him, " + (haveStance ? "off the lift's own marks." : "off his heading."));
         }
 
         // ---- lifting him --------------------------------------------------------
 
         /// <summary>
-        /// How long the lift is given before it is taken as done regardless.
-        ///
-        /// A ceiling rather than a duration: the paired clip ends itself, and this is only here
-        /// so that a scene the engine refused to start cannot hold the call-out forever.
+        /// The medic to his mark, then the lift. The patient has been holding its opening pose
+        /// since Pronounce, in the same scene, paused -- so it starts with nobody jumping.
         /// </summary>
-        private const int LiftMs = 5000;
-
-        /// <summary>And the beat with him on the canvas before anybody starts walking.</summary>
-        private const int SettleMs = 700;
-
         private void Lifting(int now)
         {
             if (!Crew.There(_body)) { Leave(now, "the body had gone"); return; }
 
             if (Entering())
             {
-                if (_scene != null) _scene.End();
+                _sceneAt = 0;
 
-                // THE LIFT IS A PAIR, LIKE THE CPR WAS. combat@drag_ped@ has a _plyr half and a
-                // _ped half authored around one origin, so the arms go under the shoulders
-                // rather than through the chest. Rooted on the body, facing the way he lies.
-                _scene = new Sync(_body.Position, _body.Heading);
-
-                var paired = _scene.Begin(false, true) &&
-                             _scene.Cast(_driver, Anim.LiftDict, Anim.LiftMedic) &&
-                             _scene.Cast(_body, Anim.LiftDict, Anim.LiftBody);
-
-                if (!paired)
+                if (_scene == null)
                 {
-                    Log.Warn("The lift scene would not start; he goes straight onto the canvas.");
+                    Log.Warn("There was no lift scene to join; he goes straight onto the canvas.");
                     To(Step.Loading, now);
                     return;
                 }
 
-                // The second man steadies the trolley rather than standing over an empty patch
-                // of road.
+                Approach(_driver, _scene, Anim.LiftDict, Anim.LiftMedic, now);
                 Steady();
                 return;
             }
 
-            var age = now - _stepAt;
+            if (_sceneAt == 0)
+            {
+                if (!Approached(_driver, now)) return;
+
+                if (!_scene.Cast(_driver, Anim.LiftDict, Anim.LiftMedic))
+                {
+                    Log.Warn("The lift would not start; he goes straight onto the canvas.");
+                    To(Step.Loading, now);
+                    return;
+                }
+
+                _scene.Rate(1f);
+                _sceneAt = now;
+                return;
+            }
+
+            var age = now - _sceneAt;
 
             if (age < 300) return;
 
@@ -1145,17 +1374,22 @@ namespace CodeThree.Scene
             To(Step.Loading, now);
         }
 
-        /// <summary>The mate at the trolley, hands on it, while the driver does the lifting.</summary>
+        /// <summary>The second man to the far side of the trolley, facing it, ready to receive him.</summary>
         private void Steady()
         {
-            if (!Crew.Alive(_mate) || !_trolley.There) return;
+            if (!Crew.Alive(_mate) || !_trolley.There || !Crew.There(_body)) return;
 
             try
             {
-                var at = _trolley.Where - _mate.ForwardVector * 1.1f;
+                var away = Motion.Flat(_trolley.Where - _body.Position);
+                if (away.Length() < 0.2f) return;
 
+                var at = _trolley.Where + away.Normalized * 0.8f;
+
+                Function.Call(Hash.CLEAR_PED_TASKS, _mate.Handle);
                 Function.Call(Hash.TASK_GO_STRAIGHT_TO_COORD, _mate.Handle,
-                              at.X, at.Y, at.Z, 1.4f, 4000, 0f, 0.3f);
+                              at.X, at.Y, Crew.Ground(at, at.Z), 1f, 5000,
+                              Motion.HeadingOf(-away), 0.3f);
             }
             catch
             {
@@ -1163,6 +1397,20 @@ namespace CodeThree.Scene
             }
         }
 
+        /// <summary>
+        /// Onto the canvas -- carried, not teleported -- and the medic round to the back.
+        ///
+        /// THE BODY IS MOVED, ALONG AN ARC, FROM THE MEDIC'S ARMS TO THE BED. It used to be
+        /// attached to the trolley the instant the lift ended, which moved him from wherever the
+        /// lift left him to the canvas in one frame: a man vanishing from somebody's arms and
+        /// reappearing lying down. Now his root travels to exactly the point the attachment will
+        /// put it, rising a little in the middle, over most of a second, while his pose settles
+        /// from being held into lying -- and only when he is there is he attached, which then
+        /// changes nothing you can see.
+        ///
+        /// Frozen and without collision for the journey: frozen so gravity does not pull him
+        /// down between the frames he is placed on, uncollided so he can pass over the rail.
+        /// </summary>
         private void Loading(int now)
         {
             if (!Crew.There(_body)) { Leave(now, "the body had gone"); return; }
@@ -1171,49 +1419,84 @@ namespace CodeThree.Scene
             {
                 if (_scene != null) _scene.End();
 
-                if (_carrying) Carry();
-                else if (!_trolley.Lay(_body)) { _carrying = true; Carry(); }
+                if (_carrying)
+                {
+                    Carry();
+                    Carrying(now);
+                    return;
+                }
 
-                // AND THE MAN WALKS TO THE TROLLEY, NOT THE TROLLEY TO THE MAN.
-                //
-                // Take() used to be called the instant the body was loaded, and Take is what
-                // starts the trolley following him -- so the bed leapt across the pavement to
-                // wherever he happened to be standing, which is the gurney "coming up" to meet
-                // the body instead of the body being put down on it. Nothing about the trolley
-                // should move during a load: it is a thing with wheels standing on a road, and
-                // he is the one who walks.
-                if (!_carrying) Step_(_driver, _trolley.Behind, 4000);
-            }
+                _laid = false;
 
-            if (now - _stepAt < SettleMs) return;
+                if (!_trolley.Bed(out _carryTo, out _carryToHeading))
+                {
+                    _trolley.Lay(_body);
+                    _laid = true;
+                    _laidAt = now;
+                    Step_(_driver, _trolley.Behind, _trolley.AlongHeading, MarkMs);
+                    return;
+                }
 
-            if (_carrying)
-            {
-                Carrying(now);
+                _carryFrom = _body.Position;
+                _carryFromHeading = _body.Heading;
+
+                Crew.Solid(_body, false);
+                Function.Call(Hash.FREEZE_ENTITY_POSITION, _body.Handle, true);
+
+                // He lets go, and the patient settles into lying over the same span he is
+                // carried across.
+                Function.Call(Hash.CLEAR_PED_TASKS, _driver.Handle);
+                Anim.Play(_body, Anim.DeadDict, Anim.DeadPose, Anim.Hold, -1, 1000f / CarryMs);
+
+                _sceneAt = now;
                 return;
             }
 
-            // He is behind it, or he has had long enough trying.
-            var set = Crew.Alive(_driver) &&
-                      _driver.Position.DistanceTo(_trolley.Behind) < 1.3f;
+            if (!_laid)
+            {
+                var t = (now - _sceneAt) / (float)CarryMs;
 
-            if (!set && now - _stepAt < _cfg.LoadMs) return;
+                if (t < 1f)
+                {
+                    var e = Motion.Smooth(t);
+                    var at = Motion.Lerp(_carryFrom, _carryTo, e) +
+                             new Vector3(0f, 0f, (float)Math.Sin(Math.PI * t) * 0.25f);
+
+                    Function.Call(Hash.SET_ENTITY_COORDS_NO_OFFSET, _body.Handle,
+                                  at.X, at.Y, at.Z, false, false, false);
+
+                    _body.Heading = Motion.Turn(_carryFromHeading, _carryToHeading, e);
+                    return;
+                }
+
+                Function.Call(Hash.FREEZE_ENTITY_POSITION, _body.Handle, false);
+
+                _trolley.Lay(_body);
+                _laid = true;
+                _laidAt = now;
+
+                // AND THE MAN WALKS TO THE TROLLEY, NOT THE TROLLEY TO THE MAN, turning at the
+                // end to face along it -- so when he takes hold, it is already in front of him
+                // and the first Follow moves it by nothing.
+                Step_(_driver, _trolley.Behind, _trolley.AlongHeading, MarkMs);
+                return;
+            }
+
+            if (now - _laidAt < SettleMs) return;
+
+            var set = Crew.Alive(_driver) &&
+                      Motion.FlatDistance(_driver.Position, _trolley.Behind) < 0.5f;
+
+            if (!set && now - _laidAt < _cfg.LoadMs) return;
 
             _trolley.Take(_driver);
 
-            Walk(_driver);
-            Walk(_mate);
+            Walk_(now);
 
             To(Step.Wheeling, now);
         }
 
-        /// <summary>
-        /// No trolley, so he goes over a shoulder.
-        ///
-        /// The same weld the trolley uses, one entity closer. It is what happens on an install
-        /// that has neither gurney prop, so that the mod still ends with the body in the
-        /// ambulance rather than with the crew standing over him because a DLC was missing.
-        /// </summary>
+        /// <summary>No trolley, so he goes over a shoulder. The install has neither gurney prop.</summary>
         private void Carry()
         {
             OnShoulder();
@@ -1237,46 +1520,21 @@ namespace CodeThree.Scene
             }
         }
 
-        /// <summary>A metre from the body, on the side the van is.</summary>
-        private Vector3 Beside(Vector3 body)
-        {
-            try
-            {
-                if (!Crew.Alive(_van)) return body;
-
-                var away = _van.Position - body;
-                away.Z = 0f;
-
-                if (away.Length() < 0.5f) return body;
-
-                return body + away.Normalized * 1.1f;
-            }
-            catch
-            {
-                return body;
-            }
-        }
-
-        /// <summary>No trolley to get behind, so he simply sets off carrying him.</summary>
         private void Carrying(int now)
         {
-            Walk(_driver);
-            Walk(_mate);
-
+            Walk_(now);
             To(Step.Wheeling, now);
         }
 
-        /// <summary>Walks somebody to an exact spot, on the ground, without running.</summary>
-        private static void Step_(Ped who, Vector3 to, int ms)
+        /// <summary>Walks somebody to an exact spot, on the ground, turning to a heading at the end.</summary>
+        private static void Step_(Ped who, Vector3 to, float heading, int ms)
         {
             if (!Crew.Alive(who)) return;
 
             try
             {
-                var at = new Vector3(to.X, to.Y, Crew.Ground(to, to.Z));
-
                 Function.Call(Hash.TASK_GO_STRAIGHT_TO_COORD, who.Handle,
-                              at.X, at.Y, at.Z, 1.3f, ms, 0f, 0.2f);
+                              to.X, to.Y, Crew.Ground(to, to.Z), 1f, ms, heading, 0.3f);
             }
             catch
             {
@@ -1284,69 +1542,103 @@ namespace CodeThree.Scene
             }
         }
 
-        /// <summary>Back to the van, at a walk. Nobody runs a trolley.</summary>
-        private void Walk(Ped who)
+        // ---- to the van --------------------------------------------------------
+
+        /// <summary>
+        /// Where the medic stops, and the second man goes.
+        ///
+        /// SHORT OF THE BUMPER, BY MEASUREMENT. He used to be sent to a point 3.2 metres behind
+        /// the van's centre, which for an ambulance is barely past its bumper -- and the trolley
+        /// goes 1.1 metres in front of him, so it was placed inside the van, every tick. With
+        /// the trolley frozen and colliding that is the physics told to push an immovable thing
+        /// into a vehicle, and it pushed the vehicle: four times the van was flung out of the
+        /// world and deleted with the crew stood behind it.
+        ///
+        /// The van's rear is now read off its model, and he stops far enough back that the front
+        /// of the trolley is half a metre short of it. The roll in through the doors is its own
+        /// step.
+        /// </summary>
+        private void Walk_(int now)
         {
-            if (!Crew.Alive(who) || !Crew.Alive(_van)) return;
+            if (!Crew.Alive(_van)) return;
 
-            try
+            if (float.IsNaN(_vanRear))
             {
-                var back = _van.Position - _van.ForwardVector * 3.2f;
+                Vector3 min, max;
+                _vanRear = Crew.Measure(Crew.Van, out min, out max) ? min.Y : -3f;
+            }
 
-                Function.Call(Hash.TASK_GO_STRAIGHT_TO_COORD, who.Handle,
-                              back.X, back.Y, back.Z, 1.2f, _cfg.WheelMs, 0f, 0.4f);
-            }
-            catch
-            {
-                // The deadline moves it on regardless.
-            }
+            var back = _carrying ? 1.0f : _cfg.TrolleyPushY + _trolley.HalfLength + 0.5f;
+
+            _stopAt = Crew.Offset(_van, 0f, _vanRear - back, 0f);
+
+            Step_(_driver, _stopAt, _van.Heading, _cfg.WheelMs);
+
+            var side = Crew.Offset(_van, 1.6f, _vanRear + 0.8f, 0f);
+            Step_(_mate, side, _van.Heading - 90f, _cfg.WheelMs);
         }
 
         private void Wheeling(int now)
         {
-            // THE PUSH POSE, RE-ASKED EVERY PASS AND ON THE UPPER BODY ONLY.
-            //
-            // The game has no pushing WALK -- the movement clipsets were searched and there is
-            // nothing for a cart, a trolley or a crate -- so this cannot be locomotion. What it
-            // can be is the shopping-trolley pose laid over an ordinary walk in the secondary
-            // slot: his legs do the walking his task gave him, his arms hold the bar. Anim.Play
-            // only issues a clip that is not already running, so calling it every tick holds the
-            // pose rather than restarting it. See Anim.Push.
             if (!_carrying)
             {
+                // The shopping-trolley pose on his upper body, over the walk his task gives him;
+                // and the trolley in front of him at the road's height, every tick.
                 Anim.Play(_driver, Anim.PushDict, Anim.PushClip, Anim.Push);
-
-                // AND THE TROLLEY KEPT IN FRONT OF HIM, EVERY TICK. It is driven rather than
-                // welded -- see Gurney.Follow for why the weld put it at chest height and tilted
-                // it whenever he leaned.
                 _trolley.Follow();
             }
 
-            var there = Crew.Alive(_driver) && Crew.Alive(_van) &&
-                        _driver.Position.DistanceTo(_van.Position) < 4.5f;
+            var there = Crew.Alive(_driver) && Motion.FlatDistance(_driver.Position, _stopAt) < 0.6f;
 
             if (!there && now - _stepAt < _cfg.WheelMs) return;
-
-            Anim.Stop(_driver, Anim.PushDict, Anim.PushClip);
 
             To(Step.Stowing, now);
         }
 
+        /// <summary>
+        /// Rolled in through the doors, then attached, then everybody aboard.
+        ///
+        /// It used to be attached straight into the van, which moved it two metres in one frame.
+        /// It rolls now, and the attach happens where the roll ends.
+        /// </summary>
         private void Stowing(int now)
         {
             if (Entering())
             {
-                if (_carrying) InVan();
-                else if (!_trolley.Stow(_van)) InVan();
-
-                // The bag goes in the back with everything else.
                 _kit.Release();
 
-                Board(_driver, -1);
-                Board(_mate, 0);
+                if (_carrying)
+                {
+                    InVan();
+                    _rolled = true;
+                    Aboard(now);
+                    return;
+                }
+
+                _trolley.RollFrom();
+                _rolled = false;
+                _sceneAt = now;
+                return;
             }
 
-            if (now - _stepAt < _cfg.StowMs) return;
+            if (!_rolled)
+            {
+                var t = (now - _sceneAt) / (float)RollMs;
+
+                if (t < 1f)
+                {
+                    _trolley.Roll(_van, Motion.Smooth(t));
+                    return;
+                }
+
+                if (!_trolley.Stow(_van)) InVan();
+
+                _rolled = true;
+                Aboard(now);
+                return;
+            }
+
+            if (now - _boardAt < _cfg.StowMs) return;
 
             Doors(false);
 
@@ -1354,26 +1646,24 @@ namespace CodeThree.Scene
 
             To(Step.Driving, now);
 
-            try
-            {
-                Function.Call(Hash.SET_VEHICLE_SIREN, _van.Handle, false);
+            Function.Call(Hash.SET_VEHICLE_SIREN, _van.Handle, false);
+            Drive(_to, 20f);
 
-                Function.Call(Hash.TASK_VEHICLE_DRIVE_TO_COORD_LONGRANGE,
-                              _driver.Handle, _van.Handle,
-                              _to.X, _to.Y, _to.Z, _cfg.Speed, DriveStyle, 20f);
-            }
-            catch (Exception ex)
-            {
-                Log.Debug("Could not send it to the hospital: " + ex.Message);
-            }
-
-            Log.Info("They are taking him to the hospital, " +
-                     (int)_van.Position.DistanceTo(_to) + "m away.");
+            Log.Info("They are taking him to the hospital, " + (int)_van.Position.DistanceTo(_to) + "m away.");
 
             if (Say != null && Near()) Say("The ambulance leaves for the hospital.");
         }
 
-        /// <summary>The body straight into the back, when there is no trolley to put it on.</summary>
+        private void Aboard(int now)
+        {
+            Anim.Stop(_driver, Anim.PushDict, Anim.PushClip);
+
+            Board(_driver, -1);
+            Board(_mate, 0);
+
+            _boardAt = now;
+        }
+
         private void InVan()
         {
             if (!Crew.There(_body) || !Crew.Alive(_van)) return;
@@ -1418,11 +1708,7 @@ namespace CodeThree.Scene
             }
         }
 
-        /// <summary>
-        /// The back doors. Three indices, because the ambulance is not a saloon: 5 is the boot
-        /// on most models and the rear pair on some; 2 and 3 are the rear side doors where a
-        /// model has them. Asking for a door a model does not have is harmless.
-        /// </summary>
+        /// <summary>The back doors: 5 is the boot on most models and the rear pair on some; 2 and 3 where a model has them.</summary>
         private void Doors(bool open)
         {
             if (!Crew.Alive(_van)) return;
@@ -1443,13 +1729,11 @@ namespace CodeThree.Scene
 
         // ---- away ---------------------------------------------------------------
 
-        /// <summary>Crew back in and the van sent off, with nobody in the back.</summary>
         private void Leave(int now, string why)
         {
             if (why != null) Log.Info("The call-out ended: " + why + ".");
 
-            // No van to get back into. They walk.
-            if (_vanLost || !Crew.Alive(_van)) { OnFoot(now, null); return; }
+            if (_vanLost || !Crew.Alive(_van)) { OnFoot(null); return; }
 
             if (_scene != null) _scene.End();
 
@@ -1466,22 +1750,13 @@ namespace CodeThree.Scene
             _to = Vector3.Zero;
         }
 
-        /// <summary>
-        /// The crew walk away from it, because there is nothing to drive.
-        ///
-        /// THE PATIENT IS DEALT WITH FIRST, not abandoned mid-pose. Done() puts a man still ours
-        /// back to dead, which is right -- a resurrected patient the crew have walked away from
-        /// is either somebody they saved, who was already released alive before this can be
-        /// reached, or somebody they could not, who goes back to the road as he was found.
-        /// </summary>
-        private void OnFoot(int now, string why)
+        private void OnFoot(string why)
         {
             if (why != null) Log.Info("The call-out ended: " + why + ".");
 
             Done();
         }
 
-        /// <summary>How a vehicle came to fail the Alive check, for the log.</summary>
         private static string HowLost(Vehicle van)
         {
             try
@@ -1501,12 +1776,8 @@ namespace CodeThree.Scene
 
         private void Driving(int now)
         {
-            // A GRACE PERIOD BEFORE THE WHEELS TURN, so the crew are actually in it.
             if (now - _stepAt < _cfg.BoardMs) return;
 
-            // ONCE, NOT EVERY FRAME. Issuing a driving task every frame does not make it happen
-            // harder; it restarts it, and a task restarted forty times a second is a van that
-            // never gets out of first gear.
             if (Entering() && _to == Vector3.Zero)
             {
                 try
@@ -1530,7 +1801,6 @@ namespace CodeThree.Scene
             if (now - _stepAt > _cfg.GoneMs) Done();
         }
 
-        /// <summary>Whether the player is close enough for a line about it to make sense.</summary>
         private bool Near()
         {
             try
@@ -1548,9 +1818,6 @@ namespace CodeThree.Scene
 
         // ---- the settings screen -----------------------------------------------
 
-        /// <summary>
-        /// Put everything back where the offsets NOW say it goes. See Options.Refit.
-        /// </summary>
         public void Refit()
         {
             if (_step == Step.None) return;
@@ -1570,7 +1837,6 @@ namespace CodeThree.Scene
             }
         }
 
-        /// <summary>What the crew are doing, in three or four words, for the settings screen.</summary>
         public string State
         {
             get
@@ -1588,8 +1854,7 @@ namespace CodeThree.Scene
                     case Step.Loading:   return _carrying ? "picking him up" : "onto the canvas";
                     case Step.Wheeling:  return _carrying ? "carrying him back" : "wheeling him back";
                     case Step.Stowing:   return "into the back";
-                    case Step.Driving:   return _to == Vector3.Zero
-                                              ? "leaving" : "driving to the hospital";
+                    case Step.Driving:   return _to == Vector3.Zero ? "leaving" : "driving to the hospital";
                     case Step.Fleeing:   return "backing off";
                 }
 
@@ -1600,8 +1865,8 @@ namespace CodeThree.Scene
         private string Working_()
         {
             if (_beats == null) return "at the body";
+            if (_beat < 0) return "kneeling down";
             if (_beat >= _beats.Length) return _verdict == Verdict.Workable ? "they have him" : "nothing to be done";
-            if (_beat < 0) return "kneeling";
 
             var clip = _beats[_beat].Clip;
 
@@ -1616,13 +1881,9 @@ namespace CodeThree.Scene
         // ---- handing it all back ------------------------------------------------
 
         /// <summary>
-        /// Everything given back to the game.
-        ///
-        /// THE ORDER IS THE POINT. The trolley lets go of the body before it is deleted, or the
-        /// body keeps an attachment to nothing and hangs in the air. THEN the body is put back
-        /// the way it was found: a man still ours is a man we resurrected and never released,
-        /// and he goes back to dead -- so no other mod ever meets a corpse that stood up and
-        /// froze. Only after that is anything handed to the population manager.
+        /// Everything given back to the game. The trolley lets go of the body before it is
+        /// deleted; THEN a man still ours goes back to dead, solid and unfrozen; only then is
+        /// anything handed to the population manager.
         /// </summary>
         public void Done()
         {
@@ -1639,6 +1900,9 @@ namespace CodeThree.Scene
                     {
                         Function.Call(Hash.DETACH_ENTITY, _body.Handle, true, true);
                     }
+
+                    Function.Call(Hash.FREEZE_ENTITY_POSITION, _body.Handle, false);
+                    Crew.Solid(_body, true);
 
                     if (_ours && Crew.Alive(_body)) Kill(_body);
 
@@ -1670,18 +1934,16 @@ namespace CodeThree.Scene
             _carrying = false;
             _bodyInVan = false;
             _ours = false;
-            _posed = false;
             _mateBusy = false;
             _vanLost = false;
+            _walk = Walk.None;
+            _poseCheck = false;
             _scene = null;
         }
 
         /// <summary>
-        /// Dead again, as he was found.
-        ///
-        /// Everything Arrest put on him comes off first, so what is left is an ordinary corpse:
-        /// ragdolls, can be searched, can be dragged, bleeds. SET_ENTITY_HEALTH to nought is the
-        /// cleanest death the engine offers -- no weapon, no force, no reaction clip.
+        /// Dead again, as he was found: everything Arrest put on him taken off, so what is left
+        /// is an ordinary corpse that ragdolls, bleeds and can be searched.
         /// </summary>
         private static void Kill(Ped who)
         {
@@ -1701,13 +1963,7 @@ namespace CodeThree.Scene
             }
         }
 
-        /// <summary>
-        /// One of the crew, put back the way he was found.
-        ///
-        /// THE BLOCKED EVENTS ARE THE ONE THAT MATTERS. A ped left with
-        /// SET_BLOCKING_OF_NON_TEMPORARY_EVENTS on cannot react to anything for the rest of the
-        /// session, and nothing on screen says why.
-        /// </summary>
+        /// <summary>One of the crew, put back the way he was found, and given somewhere to go.</summary>
         private static void Loose(Ped who)
         {
             try
@@ -1718,11 +1974,6 @@ namespace CodeThree.Scene
                 Function.Call(Hash.SET_BLOCKING_OF_NON_TEMPORARY_EVENTS, who.Handle, false);
                 Function.Call(Hash.SET_PED_CAN_BE_TARGETTED, who.Handle, true);
 
-                // SOMEWHERE TO GO. A ped handed back with his tasks cleared stands exactly where
-                // he was let go of, indefinitely, which after a scene is a paramedic frozen in
-                // the road. Given a wander he becomes one of the city's again. Not when he is in
-                // the van -- a wander task on a seated ped is a man climbing out of a moving
-                // ambulance.
                 if (!who.IsInVehicle()) Function.Call(Hash.TASK_WANDER_STANDARD, who.Handle, 10f, 10);
             }
             catch

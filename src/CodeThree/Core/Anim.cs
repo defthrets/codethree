@@ -74,7 +74,8 @@ namespace CodeThree.Core
         /// call unconditionally; TASK_PLAY_ANIM does not check whether the clip is running, it
         /// RESTARTS it, and a pose restarted forty times a second is a ped juddering on the spot.
         /// </summary>
-        public static bool Play(Ped who, string dict, string clip, int flags, int ms = -1)
+        public static bool Play(Ped who, string dict, string clip, int flags, int ms = -1,
+                                float blendIn = 8f)
         {
             try
             {
@@ -84,8 +85,12 @@ namespace CodeThree.Core
 
                 if (!Ready(dict)) return false;
 
+                // THE BLEND-IN IS HOW LONG THE CHANGE OF POSE TAKES: one over the number, in
+                // seconds. 8 is an eighth of a second, which is right for somebody starting a
+                // new action and wrong for a body being laid down, which should settle over half
+                // a second or more rather than arrive in one.
                 Function.Call(Hash.TASK_PLAY_ANIM, who.Handle, dict, clip,
-                              8f, -8f, ms, flags, 0f, false, 0, false);
+                              blendIn, -8f, ms, flags, 0f, false, 0, false);
 
                 return true;
             }
@@ -95,6 +100,40 @@ namespace CodeThree.Core
                 return false;
             }
         }
+
+        /// <summary>
+        /// Asks for every dictionary a scene will use, without waiting for any of them.
+        ///
+        /// A LOAD MID-SCENE IS A PATIENT STANDING UP. Ready() yields until a dictionary arrives,
+        /// and a resurrected man with no task yet is a man standing in his idle pose -- so the
+        /// first time a dictionary was needed after the resurrection, he visibly got up for as
+        /// long as the disk took. Asked for at dispatch, they are in memory a minute before
+        /// anybody reaches for them and Ready never has to wait.
+        /// </summary>
+        public static void Preload(params string[] dicts)
+        {
+            foreach (var dict in dicts)
+            {
+                try
+                {
+                    if (!string.IsNullOrEmpty(dict) &&
+                        !Function.Call<bool>(Hash.HAS_ANIM_DICT_LOADED, dict))
+                    {
+                        Function.Call(Hash.REQUEST_ANIM_DICT, dict);
+                    }
+                }
+                catch
+                {
+                    // Ready() finds out later, with a time box.
+                }
+            }
+        }
+
+        /// <summary>Every dictionary the call-out uses, for Preload.</summary>
+        public static readonly string[] Scene =
+        {
+            CprMedic, CprVictim, Rescue, GetUpDict, DeadDict, LiftDict, PushDict, FleeDict, LookDict,
+        };
 
         /// <summary>Whether this ped is already running this exact clip. Slot 3 covers both.</summary>
         public static bool IsPlaying(Ped who, string dict, string clip)

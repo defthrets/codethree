@@ -235,8 +235,35 @@ namespace CodeThree.Core
         /// And the last borrowed height is gone. Every floating-prop bug in this mod has been a
         /// Z taken from something that is only usually on the floor -- first the body, then the
         /// medic. The world is asked directly now, through Crew.Ground.
+        ///
+        /// 0.4.0 -- nothing teleports.
+        ///
+        /// Five versions in a row fixed the thing in the latest screenshot and left the next one
+        /// to be found the same way. This one went through the whole scene looking for the
+        /// shape all of them shared, and it was the same every time: something jumping. The
+        /// medic snapped onto his mark. The body flipped round as he knelt. The medic popped to
+        /// a standing idle between CPR clips. The bed rose to meet the body; the body leapt from
+        /// his arms onto the bed; the trolley appeared in the back of the van.
+        ///
+        /// Each is now a measurement or a movement. The patient anchors every scene where he
+        /// already lies, turned to match the way his ragdoll actually fell, read off his bones.
+        /// The medic walks to the exact mark the clip wants him on -- asked of the engine with
+        /// GET_ANIM_INITIAL_OFFSET_POSITION -- and joins a scene held paused for him. Every
+        /// one-shot holds its last frame. The body is carried along an arc onto the bed. The
+        /// trolley rolls in through the doors.
+        ///
+        /// Two failures the log had been counting all along are fixed with it. The van was
+        /// being deleted mid-scene because a frozen, colliding trolley was placed inside its
+        /// rear every tick and the physics threw the van out of the world; the trolley no longer
+        /// collides while it moves, and the medic stops short of the bumper by the van's
+        /// measured length. And thirty-eight call-outs ended "it could not get there": progress
+        /// is now watched rather than time, and a stuck van either lets the crew walk the last
+        /// stretch or is put back on a road nearer the body.
+        ///
+        /// And the settings screen can stage one in front of you, because this scene was nearly
+        /// untestable -- a murder, then two minutes, then a third of the time no van.
         /// </summary>
-        public const string Version = "0.3.2";
+        public const string Version = "0.4.0";
 
         /// <summary>The word on the splash row and at the top of the log.</summary>
         public const string Name = "Code Three";

@@ -102,6 +102,8 @@ namespace CodeThree
                     // aimed without closing the menu to go and look.
                     Scene = () => _call.Out ? _call.State : null,
                     Hopeful = () => _call.Workable,
+
+                    Stage = Stage,
                 };
 
                 // THE SEAL FOLDER IS DELIBERATELY NOT SET HERE. It is tempting -- Paths.Icons
@@ -206,6 +208,57 @@ namespace CodeThree
             // of the things you would want the menu for.
             try { if (_menu != null) _menu.Key(e.KeyCode, e.Modifiers); }
             catch (Exception ex) { Log.Debug("Key handling failed: " + ex.Message); }
+        }
+
+        /// <summary>
+        /// A call-out staged in front of the player, from the settings screen.
+        ///
+        /// A STRANGER, FOUR METRES AHEAD, KILLED CLEANLY, AND A VAN FROM FORTY OUT. What killed
+        /// him is decided by the row that was chosen rather than read off his death, because the
+        /// point is to watch a particular ending. Anything already running is stood down first:
+        /// a test is somebody asking to see the scene now.
+        ///
+        /// He is never seen standing by the watch, so the watch never answers him as well -- the
+        /// same rule that stops it answering bodies the player walked up on.
+        /// </summary>
+        private void Stage(bool workable)
+        {
+            try
+            {
+                if (_parked || !_cfg.Enabled) return;
+
+                var me = Game.Player.Character;
+                if (me == null || !me.Exists()) return;
+
+                if (_call.Out) _call.Done();
+
+                var model = Crew.Load("a_m_y_downtown_01");
+                if (model == null) { Log.Warn("The test patient's model would not load."); return; }
+
+                // IN A CAR, OFF TO THE SIDE. Four metres ahead of a car is under its bumper.
+                var at = me.Position + (me.IsInVehicle() ? me.RightVector * 5f : me.ForwardVector * 4f);
+                at.Z = Crew.Ground(at, at.Z);
+
+                var ped = World.CreatePed(model.Value, at, me.Heading + 180f);
+                model.Value.MarkAsNoLongerNeeded();
+
+                if (!Crew.There(ped)) { Log.Warn("The test patient would not spawn."); return; }
+
+                Function.Call(Hash.SET_ENTITY_HEALTH, ped.Handle, 0);
+
+                var sent = _call.Send(new Death { Body = ped, Where = at, When = Game.GameTime },
+                                      workable ? Verdict.Workable : Verdict.Gone, 40f);
+
+                if (!sent)
+                {
+                    Log.Warn("The test call-out would not dispatch -- no road near enough.");
+                    Crew.Give(ped);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Could not stage a call-out: " + ex.Message);
+            }
         }
 
         /// <summary>

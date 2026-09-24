@@ -8,30 +8,35 @@ namespace CodeThree.Core
     /// <summary>
     /// A synchronised scene: two people placed by the animation rather than by us.
     ///
-    /// WHY THE CPR NEEDS ONE. The clips in mini@cpr come in matched pairs -- char_a is the one
-    /// kneeling and pushing, char_b is the one on the ground -- and they were authored together
-    /// around a single origin: the medic's hands land on the victim's sternum because both
-    /// skeletons are positioned from the same point by the same file. Play the two halves as
-    /// ordinary TASK_PLAY_ANIMs and each starts wherever its ped happens to be standing, which
-    /// is a man doing compressions on the tarmac a foot to the left of a body. The first version
-    /// of this mod did exactly that, and the only reason it was tolerable is that it did not
-    /// animate the body at all.
+    /// WHY THE PAIRED CLIPS NEED ONE. mini@cpr, combat@drag_ped@ and random@crash_rescue all
+    /// come in matched halves authored around a single origin: the medic's hands land on the
+    /// victim's sternum because both skeletons are positioned from the same point by the same
+    /// file. Played as ordinary TASK_PLAY_ANIMs each half starts wherever its ped happens to be
+    /// standing. A synchronised scene is the engine's own answer: one origin and one rotation,
+    /// every participant tasked against it, and the animation data supplies each one's offset.
     ///
-    /// A synchronised scene is the engine's own answer: one origin and one rotation, every
-    /// participant tasked against it, and the animation data supplies each one's offset. It is
-    /// how the game itself plays these clips in the CPR minigame they were made for.
+    /// NOBODY IS TELEPORTED ONTO THEIR MARK ANY MORE. The first versions of this file created
+    /// the scene wherever the patient's pelvis was and cast both men into it with an instant
+    /// mover blend -- so the scene decided where everybody stood, and whoever was not already
+    /// there snapped there in a single frame. That is most of what "the animation is jank"
+    /// meant: a medic who walks over and then jumps half a metre sideways, a body that flips
+    /// round the moment he kneels.
     ///
-    /// ONE SCENE PER CLIP, NOT ONE SCENE PER SEQUENCE. A scene's phase runs 0 to 1 once and
-    /// stops, and re-tasking a ped against a scene whose phase is already 1 starts the new clip
-    /// on its last frame. Scenes are cheap and the engine discards one the moment nothing is
-    /// tasked against it, so the sequence is built as a fresh scene at the same origin for each
-    /// clip in turn. Origin and rotation are captured once so every clip in the sequence lands
-    /// on exactly the same spot.
+    /// Two things replace it, and both are measurements rather than guesses:
     ///
-    /// EVERYTHING HERE IS TIME-BOXED BY THE CALLER. A scene reports its own phase, so the
-    /// call-out advances on the clip actually finishing rather than on a stopwatch -- but the
-    /// caller still keeps a ceiling on every step, because a scene the engine refused to start
-    /// reports a phase of 0 forever.
+    /// ANCHORED -- the scene is placed so that the PASSIVE participant's clip starts exactly
+    /// where he already is. GET_ANIM_INITIAL_OFFSET_POSITION says where a clip puts its ped
+    /// relative to an origin; asked with the origin at zero it gives the clip's own offset, and
+    /// solving backwards from where the patient is lying gives the origin that leaves him
+    /// there. He does not move when the scene starts, because the scene was built around him.
+    ///
+    /// MARK -- the same native, asked forwards, says where the ACTIVE participant has to stand
+    /// for his half to start. So the medic is walked to that spot and turned to that heading
+    /// before he is cast, and joins a scene he is already in position for.
+    ///
+    /// PAUSED UNTIL HE IS THERE. The patient is cast first with the scene's rate at nought, so
+    /// he holds the opening pose while the medic walks to his mark; then the medic is cast into
+    /// the same scene and it is set running. Both start on the same frame of the same clip.
     /// </summary>
     internal sealed class Sync
     {
@@ -39,27 +44,30 @@ namespace CodeThree.Core
         private const int RotationOrder = 2;
 
         /// <summary>
-        /// Instant mover blend.
+        /// The mover blend for a man joining a scene he has walked to.
         ///
-        /// The mover is the ped's root; blending it slowly slides him across the ground to the
-        /// scene origin over the first few frames, which reads as somebody being dragged into
-        /// position by an invisible hand. Snapping it is a single frame of teleport, which the
-        /// eye does not resolve at the distances anybody watches this from.
+        /// NOT INSTANT ANY MORE. 1000 is a single-frame snap and was the default, which is fine
+        /// when the ped is already exactly on his mark and a visible jump when he is not. A
+        /// quarter of a second takes up whatever the walk left over -- a few centimetres, a few
+        /// degrees -- as a slide nobody sees.
         /// </summary>
-        private const float MoverBlend = 1000f;
+        public const float Settle = 4f;
+
+        /// <summary>For the one cast that SHOULD snap: a ragdoll becoming a posed patient.</summary>
+        public const float Snap = 1000f;
 
         /// <summary>Close enough to the end to call it finished.</summary>
         private const float Over = 0.985f;
 
         private readonly Vector3 _origin;
-        private readonly Vector3 _rotation;
+        private readonly float _heading;
 
         private int _scene = -1;
 
         public Sync(Vector3 origin, float heading)
         {
             _origin = origin;
-            _rotation = new Vector3(0f, 0f, heading);
+            _heading = heading;
         }
 
         /// <summary>Where every clip in this sequence is played from.</summary>
@@ -68,12 +76,96 @@ namespace CodeThree.Core
             get { return _origin; }
         }
 
+        public float Heading
+        {
+            get { return _heading; }
+        }
+
+        /// <summary>
+        /// A scene placed so that one clip starts exactly where somebody already is.
+        ///
+        /// Asked of the engine with the origin at zero and no rotation, the clip's start is its
+        /// own local offset. The origin that puts that start at `at`, facing `heading`, is then
+        /// found by turning the offset through the scene's heading and taking it away.
+        ///
+        /// If the native has nothing to say -- a dictionary that is not loaded, an edition that
+        /// answers zero -- the offset is zero and this is exactly what the old code did: the
+        /// scene rooted on him. It degrades to the previous behaviour; it never does worse.
+        /// </summary>
+        public static Sync Anchored(string dict, string clip, Vector3 at, float heading)
+        {
+            try
+            {
+                if (!Anim.Ready(dict)) return new Sync(at, heading);
+
+                var off = Function.Call<Vector3>(Hash.GET_ANIM_INITIAL_OFFSET_POSITION,
+                                                 dict, clip, 0f, 0f, 0f, 0f, 0f, 0f,
+                                                 0f, RotationOrder);
+
+                var rot = Function.Call<Vector3>(Hash.GET_ANIM_INITIAL_OFFSET_ROTATION,
+                                                 dict, clip, 0f, 0f, 0f, 0f, 0f, 0f,
+                                                 0f, RotationOrder);
+
+                var h = heading - rot.Z;
+                var turned = Motion.Rotate(off, h);
+
+                return new Sync(new Vector3(at.X - turned.X, at.Y - turned.Y, at.Z - off.Z), h);
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not anchor " + dict + "/" + clip + ": " + ex.Message);
+                return new Sync(at, heading);
+            }
+        }
+
+        /// <summary>
+        /// Where a participant must stand, and which way he must face, for this clip.
+        ///
+        /// Phase 0 is where his half starts. Phase 1 is where it ends -- which is how the trolley
+        /// is put down beside the spot the lift will leave the patient, before the lift happens.
+        /// </summary>
+        public bool Mark(string dict, string clip, float phase, out Vector3 at, out float heading)
+        {
+            at = _origin;
+            heading = _heading;
+
+            try
+            {
+                if (!Anim.Ready(dict)) return false;
+
+                var got = Function.Call<Vector3>(Hash.GET_ANIM_INITIAL_OFFSET_POSITION,
+                                                 dict, clip, _origin.X, _origin.Y, _origin.Z,
+                                                 0f, 0f, _heading, phase, RotationOrder);
+
+                // A ZERO ANSWER IS THE NATIVE DECLINING, NOT THE WORLD ORIGIN -- and the out
+                // value is left on the scene's own origin rather than written as zero, so a
+                // caller that forgets to check the return still gets somewhere sensible. The
+                // first draft of this wrote the zero through, and would have stood the trolley
+                // at the centre of the map.
+                if (got == Vector3.Zero) return false;
+
+                var rot = Function.Call<Vector3>(Hash.GET_ANIM_INITIAL_OFFSET_ROTATION,
+                                                 dict, clip, _origin.X, _origin.Y, _origin.Z,
+                                                 0f, 0f, _heading, phase, RotationOrder);
+
+                at = got;
+                heading = rot.Z;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not mark " + dict + "/" + clip + ": " + ex.Message);
+                return false;
+            }
+        }
+
         /// <summary>
         /// Starts a fresh scene at the origin. Every participant must then be Cast into it.
         ///
-        /// HOLD LAST FRAME IS THE DEFAULT for a one-shot, because the alternative is a ped
-        /// snapping to a standing idle the instant a clip ends -- and the whole sequence below
-        /// is built from clips that end in the pose the next one starts from.
+        /// HOLD LAST FRAME ON EVERY ONE-SHOT, not only the final one. A one-shot that ends and
+        /// lets go drops its ped into a standing idle until the next clip takes over -- which
+        /// happens a tick later, and a tick of a paramedic standing bolt upright in the middle
+        /// of chest compressions is a visible pop. Held, the end pose simply waits.
         /// </summary>
         public bool Begin(bool looped, bool hold = true)
         {
@@ -81,8 +173,7 @@ namespace CodeThree.Core
             {
                 _scene = Function.Call<int>(Hash.CREATE_SYNCHRONIZED_SCENE,
                                             _origin.X, _origin.Y, _origin.Z,
-                                            _rotation.X, _rotation.Y, _rotation.Z,
-                                            RotationOrder);
+                                            0f, 0f, _heading, RotationOrder);
 
                 if (_scene < 0) return false;
 
@@ -102,13 +193,11 @@ namespace CodeThree.Core
         /// <summary>
         /// Puts one participant into the current scene on one clip.
         ///
-        /// FLAGS 0, RAGDOLL BLOCKING 0, IK 0. The interesting bits of the flag word are for
-        /// scenes that should abort on damage or keep the ped's own physics; neither is wanted
-        /// for somebody kneeling on a road doing compressions, and the caller watches for the
-        /// body dying on its own. The dictionary is loaded through Anim.Ready, so a wrong name
-        /// is a logged skip rather than a hang.
+        /// The blend-in is the pose change and the mover blend is the position change; they are
+        /// separate on purpose. A patient being brought into a new pose wants a slow blend-in
+        /// and no slide; a medic arriving on his mark wants an ordinary blend and a small slide.
         /// </summary>
-        public bool Cast(Ped who, string dict, string clip)
+        public bool Cast(Ped who, string dict, string clip, float blendIn = 8f, float mover = Settle)
         {
             if (_scene < 0) return false;
             if (!Crew.Alive(who)) return false;
@@ -117,7 +206,7 @@ namespace CodeThree.Core
             try
             {
                 Function.Call(Hash.TASK_SYNCHRONIZED_SCENE, who.Handle, _scene, dict, clip,
-                              8f, -8f, 0, 0, MoverBlend, 0);
+                              blendIn, -8f, 0, 0, mover, 0);
 
                 return true;
             }
@@ -126,6 +215,20 @@ namespace CodeThree.Core
                 Log.Debug("Could not cast into " + dict + "/" + clip + ": " + ex.Message);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// How fast the scene plays. Nought holds everybody on the current frame.
+        ///
+        /// That is how the patient waits in the opening pose while the medic walks to his mark:
+        /// the scene exists, he is in it, and it simply is not moving yet.
+        /// </summary>
+        public void Rate(float rate)
+        {
+            if (_scene < 0) return;
+
+            try { Function.Call(Hash.SET_SYNCHRONIZED_SCENE_RATE, _scene, rate); }
+            catch { /* It plays at its own speed, which is the old behaviour. */ }
         }
 
         /// <summary>0 at the start, 1 at the end. Negative when there is no scene.</summary>
@@ -148,14 +251,7 @@ namespace CodeThree.Core
             }
         }
 
-        /// <summary>
-        /// Whether the current clip has run its course.
-        ///
-        /// A SCENE THAT HAS STOPPED RUNNING COUNTS AS FINISHED. The engine drops a scene the
-        /// moment nothing is tasked against it -- a ped that died, or was re-tasked by somebody
-        /// else -- and a caller waiting on phase 1 would otherwise wait forever. The caller has
-        /// its own ceiling as well; this just stops the common case from needing it.
-        /// </summary>
+        /// <summary>Whether the current clip has run its course, or the scene has gone.</summary>
         public bool Finished
         {
             get
@@ -166,24 +262,11 @@ namespace CodeThree.Core
             }
         }
 
-        /// <summary>Whether anything is playing against this scene right now.</summary>
-        public bool Running
-        {
-            get
-            {
-                if (_scene < 0) return false;
-
-                try { return Function.Call<bool>(Hash.IS_SYNCHRONIZED_SCENE_RUNNING, _scene); }
-                catch { return false; }
-            }
-        }
-
         /// <summary>
         /// Forgets the scene. The engine reclaims it once the participants are re-tasked.
         ///
         /// There is nothing to dispose. A scene lives exactly as long as something is tasked
-        /// against it, so the way to end one is to give its participants something else to do
-        /// -- which every caller does -- and this merely stops us reading a stale id.
+        /// against it, so the way to end one is to give its participants something else to do.
         /// </summary>
         public void End()
         {

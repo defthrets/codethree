@@ -124,6 +124,16 @@ get a mod that argues with the game about what just happened to you.
 
 ---
 
+## Seeing it
+
+Open the settings screen (**Shift+H**) and the top two rows stage a call-out in front of you:
+**a beating** (they bring him round) or **a shooting** (CPR, the clipboard, the trolley, the back
+of the van). A man goes down four metres ahead and a van comes in from about forty metres out,
+so the whole scene can be watched in a few seconds rather than after a murder and a two-minute
+wait.
+
+---
+
 ## Settings
 
 **Press Shift+H.** Every setting is on one screen: arrows to pick and change, Shift+H or Escape
