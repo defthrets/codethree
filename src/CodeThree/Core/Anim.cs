@@ -132,7 +132,8 @@ namespace CodeThree.Core
         /// <summary>Every dictionary the call-out uses, for Preload.</summary>
         public static readonly string[] Scene =
         {
-            CprMedic, CprVictim, Rescue, GetUpDict, DeadDict, LiftDict, PushDict, FleeDict, LookDict,
+            CprMedic, CprVictim, Rescue, GetUpDict, DeadDict, DeadFallbackDict, LiftDict, PushDict,
+            FleeDict, LookDict,
         };
 
         /// <summary>Whether this ped is already running this exact clip. Slot 3 covers both.</summary>
@@ -307,8 +308,16 @@ namespace CodeThree.Core
         // and the trolley offsets in the ini are tuned against one pose that never varies
         // rather than against however each man happened to fall.
 
-        public const string DeadDict = "dead";
-        public const string DeadPose = "dead_a";
+        // ON A SLAB, NOT ON A ROAD. dead_a was one of eight unlabelled death poses and was never
+        // checked to be flat on the back -- it was picked because the dictionary was called
+        // "dead". The morgue-table set from the casino heist has a clip for exactly a body
+        // laid out flat on a surface: ko_back, knocked out, on his back, on the table. That is a
+        // man on a gurney with the gurney removed. The old pose stays as the fallback.
+        public const string DeadDict = "anim@gangops@morgue@table@";
+        public const string DeadPose = "ko_back";
+
+        public const string DeadFallbackDict = "dead";
+        public const string DeadFallbackPose = "dead_a";
 
         // ---- the second man ----------------------------------------------------
         //

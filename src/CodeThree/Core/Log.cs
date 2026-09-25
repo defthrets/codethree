@@ -281,8 +281,19 @@ namespace CodeThree.Core
         /// be found in any config file on the machine. It cannot be stopped from here. So it is
         /// noticed on the next tick and another ambulance is put back where that one stood; the
         /// crew are on foot and not looking.
+        ///
+        /// 0.4.2 -- flat on the canvas, by measurement.
+        ///
+        /// The transport pose was one of eight unlabelled death poses, picked because the
+        /// dictionary was called "dead" and never checked to be on the back. It is the
+        /// morgue-table pose now -- a body knocked out flat on a slab -- which is a man on a
+        /// gurney with the gurney removed. And the angle and height he lies at are no longer
+        /// numbers in the ini: a quarter of a second after he is laid down, his skeleton is read
+        /// against the trolley's long axis and the canvas height, and the attach is corrected
+        /// once for the session. The lift now logs how far each man was from where the clip
+        /// wanted him when it started, and the wheeling logs if the pushing pose is refused.
         /// </summary>
-        public const string Version = "0.4.1";
+        public const string Version = "0.4.2";
 
         /// <summary>The word on the splash row and at the top of the log.</summary>
         public const string Name = "Code Three";

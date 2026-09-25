@@ -70,6 +70,24 @@ namespace CodeThree.Scene
         /// <summary>How high the canvas is above the origin.</summary>
         private float _bedZ;
 
+        /// <summary>
+        /// What the body turned out to need, on top of the numbers, to lie along the canvas.
+        ///
+        /// MEASURED OFF HIS SKELETON ONCE HE IS ON IT. Which way a lying clip points a man
+        /// relative to his own root is not written down anywhere, and the ini yaw was a guess
+        /// at it. So he is laid down with the guess, his pelvis-to-head line is read a quarter
+        /// of a second later and compared to the trolley's long axis, and the difference is
+        /// taken up here -- likewise how far his pelvis actually sits above the canvas. Learned
+        /// once per session, applied to every attach after, so only the first patient of the
+        /// evening is ever laid down twice.
+        /// </summary>
+        private float _yawFix;
+        private float _zFix;
+        private bool _squared;
+
+        /// <summary>A lying man's pelvis sits about this far above whatever he is lying on.</summary>
+        private const float PelvisAboveBed = 0.12f;
+
         /// <summary>Half its length along the long axis.</summary>
         private float _halfLength = 1f;
 
@@ -260,8 +278,8 @@ namespace CodeThree.Scene
             if (!There) return false;
 
             at = Crew.Offset(_trolley, _cfg.BodyOnTrolleyX, _cfg.BodyOnTrolleyY,
-                             _bedZ + _cfg.BodyOnTrolleyZ);
-            heading = _trolley.Heading + _cfg.BodyOnTrolleyYaw;
+                             _bedZ + _cfg.BodyOnTrolleyZ + _zFix);
+            heading = _trolley.Heading + _cfg.BodyOnTrolleyYaw + _yawFix;
 
             return at != Vector3.Zero;
         }
@@ -300,9 +318,59 @@ namespace CodeThree.Scene
                           _load.Handle, _trolley.Handle, 0,
                           _cfg.BodyOnTrolleyX,
                           _cfg.BodyOnTrolleyY,
-                          _bedZ + _cfg.BodyOnTrolleyZ,
-                          0f, 0f, _cfg.BodyOnTrolleyYaw,
+                          _bedZ + _cfg.BodyOnTrolleyZ + _zFix,
+                          0f, 0f, _cfg.BodyOnTrolleyYaw + _yawFix,
                           false, false, false, false, 2, true, 0);
+        }
+
+        /// <summary>
+        /// Reads how he is actually lying on it, and corrects the attach so he lies along it,
+        /// flat, once per session. Call a beat after Lay, when his skeleton has settled into
+        /// the pose.
+        ///
+        /// ALONG, EITHER WAY ROUND. A body lying head-to-foot along the canvas and one lying
+        /// foot-to-head are both lying along it; the correction is the smaller turn that puts
+        /// his line parallel to the axis, so it never spins him a half-turn to swap ends.
+        /// </summary>
+        public void Square(Ped body)
+        {
+            if (_squared || !There || !Crew.There(body)) return;
+
+            _squared = true;
+
+            try
+            {
+                var lying = Crew.Lying(body);
+
+                Vector3 pelvis;
+                if (float.IsNaN(lying) || !Crew.Pelvis(body, out pelvis)) return;
+
+                // The turn that makes his line parallel to the long axis, whichever end is which.
+                var off = Motion.Wrap(lying - AlongHeading);
+                if (off > 90f) off -= 180f;
+                if (off < -90f) off += 180f;
+
+                var bed = Crew.Offset(_trolley, _cfg.BodyOnTrolleyX, _cfg.BodyOnTrolleyY,
+                                      _bedZ + _cfg.BodyOnTrolleyZ);
+                var lift = (bed.Z + PelvisAboveBed) - pelvis.Z;
+
+                var turned = Math.Abs(off) > 3f;
+                var moved = Math.Abs(lift) > 0.04f;
+
+                if (turned) _yawFix = Motion.Wrap(_yawFix - off);
+                if (moved) _zFix = Math.Max(-0.6f, Math.Min(0.6f, _zFix + lift));
+
+                Log.Info("On the canvas: " + (turned ? "turned " + (-off).ToString("0") + " degrees" : "square") +
+                         ", " + (moved ? (lift > 0 ? "lifted " : "lowered ") + Math.Abs(lift * 100f).ToString("0") + "cm" : "level") +
+                         ". Fit now yaw " + (_cfg.BodyOnTrolleyYaw + _yawFix).ToString("0") +
+                         ", bed " + (_bedZ + _cfg.BodyOnTrolleyZ + _zFix).ToString("0.00") + ".");
+
+                if (turned || moved) OnCanvas();
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not square him on the canvas: " + ex.Message);
+            }
         }
 
         /// <summary>

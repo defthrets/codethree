@@ -234,6 +234,12 @@ namespace CodeThree.Scene
         private bool _laid;
         private int _laidAt;
         private bool _rolled;
+
+        /// <summary>Whether he has been measured on the canvas this call-out.</summary>
+        private bool _squared;
+
+        /// <summary>Said once if the pushing pose will not take, so the log is not a torrent.</summary>
+        private bool _pushWarned;
         private int _boardAt;
         private Vector3 _stopAt;
 
@@ -1529,6 +1535,13 @@ namespace CodeThree.Scene
 
                 _scene.Rate(1f);
                 _sceneAt = now;
+
+                // SAID OUT LOUD, so the next log answers "did it line up" with numbers: how far
+                // the medic was from the spot the clip starts him on when he joined, and how far
+                // the patient's pelvis was from where the scene expects it. Under a tenth of a
+                // metre and it lined up; over half a metre and something is placing one of them
+                // wrong, and this says which.
+                Alignment();
                 return;
             }
 
@@ -1542,6 +1555,33 @@ namespace CodeThree.Scene
             if (!done) return;
 
             To(Step.Loading, now);
+        }
+
+        /// <summary>How well the lift's two halves met, in the log.</summary>
+        private void Alignment()
+        {
+            try
+            {
+                var medicOff = Crew.Alive(_driver) && _walkTo != Vector3.Zero
+                             ? Motion.FlatDistance(_driver.Position, _walkTo) : -1f;
+
+                Vector3 expect;
+                float ignored;
+                var patientOff = -1f;
+
+                if (_scene.Mark(Anim.LiftDict, Anim.LiftBody, 0f, out expect, out ignored))
+                {
+                    patientOff = Motion.FlatDistance(_body.Position, expect);
+                }
+
+                Log.Info("The lift starts: medic " + (medicOff < 0 ? "?" : medicOff.ToString("0.00") + "m") +
+                         " off his mark, patient " + (patientOff < 0 ? "?" : patientOff.ToString("0.00") + "m") +
+                         " off the scene.");
+            }
+            catch
+            {
+                // Diagnostic only.
+            }
         }
 
         /// <summary>The second man to the far side of the trolley, facing it, ready to receive him.</summary>
@@ -1610,10 +1650,17 @@ namespace CodeThree.Scene
                 Crew.Solid(_body, false);
                 Function.Call(Hash.FREEZE_ENTITY_POSITION, _body.Handle, true);
 
-                // He lets go, and the patient settles into lying over the same span he is
-                // carried across.
+                // He lets go, and the patient settles into lying flat over the same span he is
+                // carried across -- the morgue-table pose, with the old one behind it if the
+                // dictionary will not load.
                 Function.Call(Hash.CLEAR_PED_TASKS, _driver.Handle);
-                Anim.Play(_body, Anim.DeadDict, Anim.DeadPose, Anim.Hold, -1, 1000f / CarryMs);
+
+                if (!Anim.Play(_body, Anim.DeadDict, Anim.DeadPose, Anim.Hold, -1, 1000f / CarryMs))
+                {
+                    Anim.Play(_body, Anim.DeadFallbackDict, Anim.DeadFallbackPose, Anim.Hold, -1, 1000f / CarryMs);
+                }
+
+                _squared = false;
 
                 _sceneAt = now;
                 return;
@@ -1647,6 +1694,15 @@ namespace CodeThree.Scene
                 // and the first Follow moves it by nothing.
                 Step_(_driver, _trolley.Behind, _trolley.AlongHeading, MarkMs);
                 return;
+            }
+
+            // A QUARTER OF A SECOND ON, HE IS MEASURED AND SQUARED. His skeleton needs a few
+            // frames to take up the lying pose after the attach; read too soon it is half the
+            // carried pose, and the correction would be wrong for the whole session.
+            if (!_squared && now - _laidAt >= 250)
+            {
+                _squared = true;
+                _trolley.Square(_body);
             }
 
             if (now - _laidAt < SettleMs) return;
@@ -1750,6 +1806,17 @@ namespace CodeThree.Scene
                 // and the trolley in front of him at the road's height, every tick.
                 Anim.Play(_driver, Anim.PushDict, Anim.PushClip, Anim.Push);
                 _trolley.Follow();
+
+                // IF THE POSE IS NOT ON HIM A SECOND IN, THE LOG SAYS SO. An upper-body clip in
+                // the secondary slot is meant to sit over a walk, and if the walk task is
+                // refusing it there is nothing to see but a man walking normally with a trolley
+                // in front of him -- which is the report, and which this line would explain.
+                if (!_pushWarned && now - _stepAt > 1000 &&
+                    !Anim.IsPlaying(_driver, Anim.PushDict, Anim.PushClip))
+                {
+                    _pushWarned = true;
+                    Log.Warn("The pushing pose is not taking on the medic while he walks.");
+                }
             }
 
             var there = Crew.Alive(_driver) && Motion.FlatDistance(_driver.Position, _stopAt) < 0.6f;
@@ -2108,6 +2175,8 @@ namespace CodeThree.Scene
             _walk = Walk.None;
             _poseCheck = false;
             _groundWarned = false;
+            _pushWarned = false;
+            _squared = false;
             _vanAt = Vector3.Zero;
             _scene = null;
         }
