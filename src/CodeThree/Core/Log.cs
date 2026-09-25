@@ -306,8 +306,18 @@ namespace CodeThree.Core
         ///
         /// And the back of the van is a sequence now: at the rear, doors open, trolley in, doors
         /// shut, both men in, and it goes when both are actually seated.
+        ///
+        /// 0.4.4 -- the measurement was right; the bounds were wrong.
+        ///
+        /// Two numbers came back from every single call-out: the lying clips turn the body a
+        /// hundred and seventy-seven degrees, and they draw it ninety-nine centimetres below
+        /// its root. Both were refused as implausible, so he was posed backwards and a metre
+        /// under the road every time, and laid on the ground under the canvas every time. A
+        /// constant is not noise. The turn is applied whatever its size, the height is measured
+        /// off his pelvis and the scene lifted by it, and the trolley's fit accepts a root
+        /// convention of up to a metre and a half.
         /// </summary>
-        public const string Version = "0.4.3";
+        public const string Version = "0.4.4";
 
         /// <summary>The word on the splash row and at the top of the log.</summary>
         public const string Name = "Code Three";

@@ -89,8 +89,16 @@ namespace CodeThree.Scene
         private float _zFix;
         private bool _squared;
 
-        /// <summary>Further than this is not a man slightly off the canvas; it is a man somewhere else.</summary>
-        private const float MostLift = 0.5f;
+        /// <summary>
+        /// Further than this is not a man off the canvas; it is a man somewhere else.
+        ///
+        /// A METRE AND A HALF, NOT HALF A METRE. The lying clips keep the ped's root about a
+        /// metre above the drawn body -- see Callout._poseZ -- so a man attached by his root at
+        /// bed height is drawn a metre lower, on the ground under the canvas. The log said
+        /// "99cm under" every time and the old bound refused it as not a fit problem. It was
+        /// the whole fit problem.
+        /// </summary>
+        private const float MostLift = 1.5f;
 
         /// <summary>A lying man's pelvis sits about this far above whatever he is lying on.</summary>
         private const float PelvisAboveBed = 0.12f;
@@ -390,8 +398,8 @@ namespace CodeThree.Scene
                 if (Math.Abs(lift) > MostLift)
                 {
                     Log.Warn("On the canvas: he is " + Math.Abs(lift * 100f).ToString("0") + "cm " +
-                             (lift > 0 ? "under" : "over") + " the bed, which is not a fit problem; " +
-                             "the attach is not being honoured. Left as set.");
+                             (lift > 0 ? "under" : "over") + " the bed, which is further than any " +
+                             "root convention explains. Left as set.");
                     return;
                 }
 

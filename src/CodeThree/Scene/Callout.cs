@@ -196,6 +196,9 @@ namespace CodeThree.Scene
         /// <summary>Said once per call-out when the engine calls a healthy van dead.</summary>
         private bool _vanDoubted;
 
+        /// <summary>Whether a replacement driver has already been put at the wheel this call-out.</summary>
+        private bool _recrewed;
+
         private Sync _scene;
         private Beat[] _beats;
         private int _beat;
@@ -233,6 +236,22 @@ namespace CodeThree.Scene
         /// </summary>
         private float _twist;
         private Vector3 _local;
+
+        /// <summary>
+        /// How far the pose's root sits above the body it draws, measured off his pelvis.
+        ///
+        /// THE LYING CLIPS KEEP THE ROOT A METRE UP. Every lying-down clip this mod uses -- the
+        /// CPR victim, the lift casualty, the morgue slab -- turns out to keep the ped's root
+        /// where a standing skeleton's pelvis would be, about a metre above where the body is
+        /// drawn. Anchor that root at the road and the body is drawn a metre under it. The log
+        /// said so in the same number every time, "99cm under", and it was refused as
+        /// implausible. It is not implausible; it is the convention, and this is the correction
+        /// for it -- measured off the pelvis bone after posing, applied to the scene's height.
+        /// </summary>
+        private float _poseZ;
+
+        /// <summary>A lying man's pelvis sits about this far above what he lies on.</summary>
+        private const float PelvisAboveGround = 0.12f;
 
         /// <summary>Where the trolley has got to going into the van.</summary>
         private enum Stow { Opening, Rolling, Closing, Boarding }
@@ -385,6 +404,7 @@ namespace CodeThree.Scene
                 _groundWarned = false;
                 _pushHard = false;
                 _vanDoubted = false;
+                _recrewed = false;
                 _vanAt = from;
                 _vanHeading = _van.Heading;
                 _heldAt = Game.GameTime;
@@ -431,9 +451,22 @@ namespace CodeThree.Scene
             {
                 if (!Crew.Alive(_driver))
                 {
-                    Log.Info("The call-out ended: the driver was " + Fate(_driver) + " while " + State + ".");
-                    Done();
-                    return;
+                    // DELETED AT THE WHEEL, ANOTHER PUT AT IT. Something on this machine removes
+                    // peds from moving vehicles -- "deleted while driving to the hospital",
+                    // "deleted while on the way" -- and a van with nobody at the wheel is a
+                    // scene that never arrives. If the van is still there and the man was taken
+                    // rather than killed, a new driver is put in and the route re-issued, once.
+                    if (!_recrewed && Crew.Alive(_van) && (_step == Step.Coming || _step == Step.Driving) &&
+                        (_driver == null || !_driver.Exists()) && Recrew())
+                    {
+                        Log.Warn("The driver was deleted while " + State + "; another was put at the wheel.");
+                    }
+                    else
+                    {
+                        Log.Info("The call-out ended: the driver was " + Fate(_driver) + " while " + State + ".");
+                        Done();
+                        return;
+                    }
                 }
 
                 // THE VAN IS NOT THE SCENE. A lost van is noted once and the scene carries on;
@@ -540,11 +573,48 @@ namespace CodeThree.Scene
         /// patient is held and every dictionary is already in memory, so a yield here costs a
         /// frame and nothing else.
         /// </summary>
+        /// <summary>A new driver in the seat of a van that has lost its own, and the route again.</summary>
+        private bool Recrew()
+        {
+            try
+            {
+                _recrewed = true;
+
+                var driver = Crew.Aboard(_van, -1);
+                if (driver == null) return false;
+
+                _driver = driver;
+
+                if (_step == Step.Coming) Drive(_at, _cfg.ThereRange * 0.6f);
+                else if (_to != Vector3.Zero) Drive(_to, 20f);
+                else Function.Call(Hash.TASK_VEHICLE_DRIVE_WANDER, _driver.Handle, _van.Handle, _cfg.Speed, DriveStyle);
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not put a new driver in: " + ex.Message);
+                return false;
+            }
+        }
+
         private bool Revan()
         {
             try
             {
                 if (_vanAt == Vector3.Zero) return false;
+
+                // THE OLD ONE GOES, IF IT IS STILL THERE. A burning van reads as dead with its
+                // health intact, and a replacement spawned at its position is two ambulances in
+                // one space, one of them on fire. It is ours; it is removed.
+                try
+                {
+                    if (_van != null && _van.Exists()) { _van.IsPersistent = false; _van.Delete(); }
+                }
+                catch
+                {
+                    // Gone already.
+                }
 
                 var model = Crew.Load(Crew.Van, 600);
                 if (model == null) return false;
@@ -600,12 +670,16 @@ namespace CodeThree.Scene
             var above = Crew.Above(who);
             if (above > -0.45f) return;
 
-            if (!_groundWarned)
-            {
-                _groundWarned = true;
-                Log.Warn(name + " was " + (-above).ToString("0.00") + "m under the road while " +
-                         State + "; lifted back up.");
-            }
+            // ONCE PER STEP, NOT EVERY TICK. A man under the road inside a synchronised scene is
+            // put there by the scene every frame, and a guard that lifts him every frame is two
+            // things moving one body in opposite directions forty times a second -- which is a
+            // patient juddering in the road. The scene's own height is corrected properly in
+            // CheckPose; this is the last resort, and it fires once so the log can say so.
+            if (_groundWarned) return;
+
+            _groundWarned = true;
+            Log.Warn(name + " was " + (-above).ToString("0.00") + "m under the road while " +
+                     State + "; lifted once.");
 
             var at = who.Position;
             Function.Call(Hash.SET_ENTITY_COORDS_NO_OFFSET, who.Handle,
@@ -901,6 +975,7 @@ namespace CodeThree.Scene
             // Fresh for this pose. See _twist.
             _twist = 0f;
             _local = Vector3.Zero;
+            _poseZ = 0f;
 
             PoseNow();
 
@@ -922,7 +997,7 @@ namespace CodeThree.Scene
                 root = new Vector3(p.X, p.Y, root.Z);
             }
 
-            root.Z = Crew.Ground(root, root.Z);
+            root.Z = Crew.Ground(root, root.Z) + _poseZ;
 
             _scene = Sync.Anchored(_poseDict, _poseClip, root, heading);
 
@@ -968,23 +1043,35 @@ namespace CodeThree.Scene
                 var turned = Math.Abs(Motion.Wrap(lyingNow - _poseLying));
                 var moved = Motion.FlatDistance(pelvisNow, _posePelvis);
 
-                // BOUNDED, OR NOT USED. A pelvis more than a metre and a bit from its own root
-                // is not a lying pose being measured, it is a skeleton and an entity read from
-                // two different places -- and a turn past a right angle is the same thing seen
-                // the other way. Either is logged and ignored; the pose stands as placed.
-                var plausible = local.Length() <= 1.2f && turned <= 90f && moved <= 1.5f;
+                // AND HOW FAR UNDER THE ROAD HE IS DRAWN. The pelvis of a man lying on the ground
+                // is a hand's width above it; anything else is the clip's root convention, and
+                // the scene is moved by the difference. See _poseZ.
+                var ground = Crew.Ground(pelvisNow, pelvisNow.Z);
+                var lift = (ground + PelvisAboveGround) - pelvisNow.Z;
 
-                Log.Info("Posed " + _poseClip + ": he moved " + moved.ToString("0.00") + "m and turned " +
-                         turned.ToString("0") + " degrees going into it" +
-                         (!plausible ? " -- implausible, not corrected." :
-                          turned > 12f || moved > 0.25f ? "; re-placed." : "."));
+                // BOUNDED, OR NOT USED -- BUT THE BOUNDS ARE ON DISTANCES, NOT ON ANGLES. A pelvis
+                // more than a metre and a bit from its own root, or a body that has moved more
+                // than a stride, is a skeleton and an entity read from two different places.
+                // A turn of any size is not: the first version refused anything past a right
+                // angle, and the clips turn the body a hundred and seventy-seven degrees every
+                // single time, which is not garbage, it is the clip. A lift of up to a metre
+                // and a half is the root convention, not an error.
+                var plausible = local.Length() <= 1.2f && moved <= 1.5f && Math.Abs(lift) <= 1.5f;
+
+                var off = turned > 12f || moved > 0.25f || Math.Abs(lift) > 0.08f;
+
+                Log.Info("Posed " + _poseClip + ": he moved " + moved.ToString("0.00") + "m, turned " +
+                         turned.ToString("0") + " degrees and sat " + (lift * 100f).ToString("0") +
+                         "cm low going into it" +
+                         (!plausible ? " -- implausible, not corrected." : off ? "; re-placed." : "."));
 
                 if (!plausible) return;
 
                 _twist = twist;
                 _local = local;
+                _poseZ += lift;
 
-                if (turned > 12f || moved > 0.25f) PoseNow();
+                if (off) PoseNow();
             }
             catch (Exception ex)
             {
@@ -2372,6 +2459,7 @@ namespace CodeThree.Scene
             _pushWarned = false;
             _pushHard = false;
             _vanDoubted = false;
+            _recrewed = false;
             _squared = false;
             _vanAt = Vector3.Zero;
             _scene = null;
