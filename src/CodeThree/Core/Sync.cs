@@ -117,7 +117,23 @@ namespace CodeThree.Core
                 // the real one, with every participant placed relative to it. A clip that kneels
                 // or lies starts on the scene's floor; the floor is the road; so the road's
                 // height is the origin's, and only X and Y are solved.
-                return new Sync(new Vector3(at.X - turned.X, at.Y - turned.Y, at.Z), h);
+                var origin = new Vector3(at.X - turned.X, at.Y - turned.Y, at.Z);
+
+                // AN ORIGIN MORE THAN A COUPLE OF METRES FROM HIM IS THE NATIVE TALKING NONSENSE.
+                // A clip's initial offset is the distance from the scene origin to where the
+                // ped starts, and for a man lying at the origin that is under a metre. The one
+                // time it came back as fourteen, the scene was built fourteen metres away, he
+                // snapped to it when it started, and the trolley was put down beside where it
+                // ended -- up a bank, by a fence. Rooted on him instead, which is what the
+                // scene did before any of this and is never worse than a small slide.
+                if (Motion.FlatDistance(origin, at) > 2.5f)
+                {
+                    Log.Warn("The engine placed " + clip + " " + Motion.FlatDistance(origin, at).ToString("0.0") +
+                             "m from the patient; rooting the scene on him instead.");
+                    return new Sync(at, heading);
+                }
+
+                return new Sync(origin, h);
             }
             catch (Exception ex)
             {

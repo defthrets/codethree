@@ -292,8 +292,22 @@ namespace CodeThree.Core
         /// against the trolley's long axis and the canvas height, and the attach is corrected
         /// once for the session. The lift now logs how far each man was from where the clip
         /// wanted him when it started, and the wheeling logs if the pushing pose is refused.
+        ///
+        /// 0.4.3 -- nothing is remembered, and the doors go in order.
+        ///
+        /// The first log with numbers in it said: one scene built fourteen metres from the
+        /// body, its measurements cached for the session, and every patient after it placed
+        /// wrong -- including two whose own scenes were perfect. So no measurement is kept past
+        /// the pose it was read in, every one is bounded before it is used, and the engine's
+        /// placements are checked against where the man actually lies before they are believed.
+        ///
+        /// The patient lay flat, aligned, on the ground directly under the canvas: the attach
+        /// was made with isPed false, so the height was honoured for a crate and not a man.
+        ///
+        /// And the back of the van is a sequence now: at the rear, doors open, trolley in, doors
+        /// shut, both men in, and it goes when both are actually seated.
         /// </summary>
-        public const string Version = "0.4.2";
+        public const string Version = "0.4.3";
 
         /// <summary>The word on the splash row and at the top of the log.</summary>
         public const string Name = "Code Three";

@@ -384,6 +384,16 @@ namespace CodeThree.Core
         /// </summary>
         public const int Push = 49;
 
+        /// <summary>
+        /// The same, plus AF_NOT_INTERRUPTABLE (8), for when the walk task refuses the first.
+        ///
+        /// The log said the pose was not taking: the navmesh walk task can clear a secondary
+        /// clip the moment it starts a new leg of the route, and re-issuing it every tick then
+        /// just restarts it on frame nought forever. Not-interruptable is the bit that tells the
+        /// movement task to leave it alone.
+        /// </summary>
+        public const int PushHard = 57;
+
         // ---- how he walks away -------------------------------------------------
 
         public const string LimpMale = "move_m@injured";

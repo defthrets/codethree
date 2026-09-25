@@ -73,17 +73,24 @@ namespace CodeThree.Scene
         /// <summary>
         /// What the body turned out to need, on top of the numbers, to lie along the canvas.
         ///
-        /// MEASURED OFF HIS SKELETON ONCE HE IS ON IT. Which way a lying clip points a man
-        /// relative to his own root is not written down anywhere, and the ini yaw was a guess
-        /// at it. So he is laid down with the guess, his pelvis-to-head line is read a quarter
-        /// of a second later and compared to the trolley's long axis, and the difference is
-        /// taken up here -- likewise how far his pelvis actually sits above the canvas. Learned
-        /// once per session, applied to every attach after, so only the first patient of the
-        /// evening is ever laid down twice.
+        /// MEASURED OFF HIS SKELETON ONCE HE IS ON IT, AND NEVER REMEMBERED. Which way a lying
+        /// clip points a man relative to his own root is not written down anywhere, so he is
+        /// laid down with the ini's guess, his pelvis-to-head line is read a quarter of a second
+        /// later against the trolley's long axis, and the difference is taken up here.
+        ///
+        /// The first version of this kept the answer for the session. One call-out whose scene
+        /// had been built fourteen metres from the body measured "turn 87 degrees, lift 99cm",
+        /// remembered it, and applied it to every patient after -- two of whom had lined up
+        /// perfectly. A correction is only ever as good as the scene it was measured in, so it
+        /// lives and dies with the trolley it was measured on, and anything outside what a man
+        /// on a bed could plausibly need is thrown away rather than applied.
         /// </summary>
         private float _yawFix;
         private float _zFix;
         private bool _squared;
+
+        /// <summary>Further than this is not a man slightly off the canvas; it is a man somewhere else.</summary>
+        private const float MostLift = 0.5f;
 
         /// <summary>A lying man's pelvis sits about this far above whatever he is lying on.</summary>
         private const float PelvisAboveBed = 0.12f;
@@ -176,9 +183,14 @@ namespace CodeThree.Scene
         /// should move it until a man takes hold of it, and it keeps its collision while it
         /// stands there, because people should walk round a trolley rather than through it.
         /// </summary>
-        public bool Bring(Vector3 at, float alongHeading)
+        public bool Bring(Vector3 at, float alongHeading, float nearZ)
         {
             if (There) return true;
+
+            // A correction is only as good as the trolley it was measured on. See _yawFix.
+            _yawFix = 0f;
+            _zFix = 0f;
+            _squared = false;
 
             foreach (var name in Props)
             {
@@ -201,7 +213,19 @@ namespace CodeThree.Scene
 
                     _trolley.Heading = alongHeading + _axisYaw;
 
-                    var ground = Crew.Ground(at, at.Z);
+                    // THE ROAD'S HEIGHT, CHECKED AGAINST THE PATIENT'S. The probe is usually
+                    // right, and when it is wrong it is wrong by a storey -- a spot inside a
+                    // wall, a probe that found a roof -- and that is the trolley in the sky. A
+                    // man lying beside it is at road height by definition, so anything more
+                    // than a metre and a half from him is not the road, and his height is used.
+                    var ground = Crew.Ground(at, nearZ);
+
+                    if (Math.Abs(ground - nearZ) > 1.5f)
+                    {
+                        Log.Warn("The ground probe put the trolley " + (ground - nearZ).ToString("0.0") +
+                                 "m from the patient's height; using his instead.");
+                        ground = nearZ;
+                    }
 
                     Function.Call(Hash.SET_ENTITY_COORDS_NO_OFFSET, _trolley.Handle,
                                   at.X, at.Y, ground + _standZ, false, false, false);
@@ -314,13 +338,19 @@ namespace CodeThree.Scene
         {
             if (!There || !Crew.There(_load)) return;
 
+            // isPed IS TRUE, AND THAT IS THE WHOLE OF WHY HE WAS UNDER THE BED. The thirteenth
+            // argument says whether the thing being attached is a ped, and it was passed as
+            // false -- so the engine attached him as it would a crate, and a crate has no
+            // capsule to lift clear of the surface. He lay flat, along the canvas, aligned to
+            // the centimetre, on the ground directly beneath it: the X, the Y and the pose all
+            // honoured and the Z not. With the flag set the offset is applied to a ped.
             Function.Call(Hash.ATTACH_ENTITY_TO_ENTITY,
                           _load.Handle, _trolley.Handle, 0,
                           _cfg.BodyOnTrolleyX,
                           _cfg.BodyOnTrolleyY,
                           _bedZ + _cfg.BodyOnTrolleyZ + _zFix,
                           0f, 0f, _cfg.BodyOnTrolleyYaw + _yawFix,
-                          false, false, false, false, 2, true, 0);
+                          false, false, false, true, 2, true, 0);
         }
 
         /// <summary>
@@ -354,11 +384,22 @@ namespace CodeThree.Scene
                                       _bedZ + _cfg.BodyOnTrolleyZ);
                 var lift = (bed.Z + PelvisAboveBed) - pelvis.Z;
 
+                // A LIFT BIGGER THAN HALF A METRE IS NOT A MEASUREMENT OF A MAN ON A BED. It is
+                // a man on the ground under the bed, or in the next street, and correcting the
+                // attach by it would put the next patient in the air. Logged, and left alone.
+                if (Math.Abs(lift) > MostLift)
+                {
+                    Log.Warn("On the canvas: he is " + Math.Abs(lift * 100f).ToString("0") + "cm " +
+                             (lift > 0 ? "under" : "over") + " the bed, which is not a fit problem; " +
+                             "the attach is not being honoured. Left as set.");
+                    return;
+                }
+
                 var turned = Math.Abs(off) > 3f;
                 var moved = Math.Abs(lift) > 0.04f;
 
                 if (turned) _yawFix = Motion.Wrap(_yawFix - off);
-                if (moved) _zFix = Math.Max(-0.6f, Math.Min(0.6f, _zFix + lift));
+                if (moved) _zFix = _zFix + lift;
 
                 Log.Info("On the canvas: " + (turned ? "turned " + (-off).ToString("0") + " degrees" : "square") +
                          ", " + (moved ? (lift > 0 ? "lifted " : "lowered ") + Math.Abs(lift * 100f).ToString("0") + "cm" : "level") +
@@ -579,6 +620,9 @@ namespace CodeThree.Scene
             _load = null;
             _aboard = null;
             _holder = Held.Loose;
+            _yawFix = 0f;
+            _zFix = 0f;
+            _squared = false;
         }
     }
 }

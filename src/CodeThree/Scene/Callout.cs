@@ -193,6 +193,9 @@ namespace CodeThree.Scene
         /// <summary>Warned once per step about somebody under the floor, so the log is not a torrent.</summary>
         private bool _groundWarned;
 
+        /// <summary>Said once per call-out when the engine calls a healthy van dead.</summary>
+        private bool _vanDoubted;
+
         private Sync _scene;
         private Beat[] _beats;
         private int _beat;
@@ -217,12 +220,28 @@ namespace CodeThree.Scene
         private bool _poseCheck;
 
         /// <summary>
-        /// For each opening pose, which way a body in it lies relative to its root, and where
-        /// its pelvis sits in the root's frame. Measured the first time a pose is used and kept
-        /// for the session, so only the very first scene ever needs a correction.
+        /// For the pose he is currently in: which way it lies relative to its root, and where
+        /// its pelvis sits in the root's frame.
+        ///
+        /// MEASURED PER POSE, NEVER KEPT. These were a session-wide cache, on the reasoning that
+        /// a clip lies the same way every time so only the first scene of the evening should
+        /// need correcting. True of the clip; not true of the measurement. One call-out whose
+        /// scene had been built fourteen metres from the body measured garbage, the garbage was
+        /// remembered, and every patient after it was placed fourteen metres wrong -- including
+        /// two whose own scenes had been perfect. A correction is only as good as the scene it
+        /// was read in, so it lasts exactly as long as that pose does.
         /// </summary>
-        private static readonly Dictionary<string, float> Twist = new Dictionary<string, float>();
-        private static readonly Dictionary<string, Vector3> PelvisAt = new Dictionary<string, Vector3>();
+        private float _twist;
+        private Vector3 _local;
+
+        /// <summary>Where the trolley has got to going into the van.</summary>
+        private enum Stow { Opening, Rolling, Closing, Boarding }
+
+        private Stow _stow;
+        private int _stowAt;
+
+        /// <summary>Whether the pushing pose has had to be re-issued with the stronger flags.</summary>
+        private bool _pushHard;
 
         // ---- the scene's moving parts -----------------------------------------
 
@@ -233,14 +252,11 @@ namespace CodeThree.Scene
         private float _carryToHeading;
         private bool _laid;
         private int _laidAt;
-        private bool _rolled;
-
         /// <summary>Whether he has been measured on the canvas this call-out.</summary>
         private bool _squared;
 
         /// <summary>Said once if the pushing pose will not take, so the log is not a torrent.</summary>
         private bool _pushWarned;
-        private int _boardAt;
         private Vector3 _stopAt;
 
         // ---- getting there -----------------------------------------------------
@@ -367,6 +383,8 @@ namespace CodeThree.Scene
                 _walk = Walk.None;
                 _poseCheck = false;
                 _groundWarned = false;
+                _pushHard = false;
+                _vanDoubted = false;
                 _vanAt = from;
                 _vanHeading = _van.Heading;
                 _heldAt = Game.GameTime;
@@ -413,14 +431,28 @@ namespace CodeThree.Scene
             {
                 if (!Crew.Alive(_driver))
                 {
-                    Log.Info("The call-out ended: the driver was lost.");
+                    Log.Info("The call-out ended: the driver was " + Fate(_driver) + " while " + State + ".");
                     Done();
                     return;
                 }
 
                 // THE VAN IS NOT THE SCENE. A lost van is noted once and the scene carries on;
                 // only the steps that need somewhere to put him give up.
-                if (!Crew.Alive(_van))
+                //
+                // AND A VAN AT FULL HEALTH IS NOT LOST, WHATEVER IS_ENTITY_DEAD SAYS. Twice it
+                // reported the van dead at a thousand health, a replacement was spawned on top
+                // of it, and there were two ambulances. A vehicle that exists, is not on fire
+                // and has most of its health is a vehicle; the flag is answered with a shrug.
+                if (!Crew.Alive(_van) && Sound(_van))
+                {
+                    if (!_vanDoubted)
+                    {
+                        _vanDoubted = true;
+                        Log.Warn("The engine says the van is dead at " + Health(_van) +
+                                 " health while " + State + "; ignoring it.");
+                    }
+                }
+                else if (!Crew.Alive(_van))
                 {
                     // TAKEN AWAY WITH THE CREW ON FOOT: another one goes back where it stood.
                     // Between the crew getting out and the trolley rolling in, the van is a
@@ -801,6 +833,25 @@ namespace CodeThree.Scene
                 return;
             }
 
+            // A MARK MORE THAN A FEW METRES FROM THE PATIENT IS NOT A MARK. The clip starts the
+            // medic within arm's reach of the man he is about to kneel at or lift, so a spot
+            // further off than that is the engine answering for a scene that is not where the
+            // patient is. He was once sent 5.4 metres to one and never arrived. If it is
+            // nonsense, he walks to a metre from the patient, facing him, which is where every
+            // one of these clips actually starts.
+            Vector3 pelvis;
+            if (Crew.There(_body) && Crew.Pelvis(_body, out pelvis) && Motion.FlatDistance(at, pelvis) > 4f)
+            {
+                Log.Warn("The mark for " + clip + " was " + Motion.FlatDistance(at, pelvis).ToString("0.0") +
+                         "m from the patient; sending him to the patient instead.");
+
+                var toward = Motion.Flat(who.Position - pelvis);
+                if (toward.Length() < 0.3f) toward = Motion.Facing(_body.Heading);
+
+                at = pelvis + toward.Normalized * 1f;
+                heading = Motion.HeadingOf(pelvis - at);
+            }
+
             _walkTo = at;
 
             Crew.WalkTo(who, at, heading, 1f, MarkMs);
@@ -847,29 +898,27 @@ namespace CodeThree.Scene
             _poseBlend = blend;
             _poseMover = mover;
 
+            // Fresh for this pose. See _twist.
+            _twist = 0f;
+            _local = Vector3.Zero;
+
             PoseNow();
 
             _posedAt = now;
-            _poseCheck = !Twist.ContainsKey(clip) && !float.IsNaN(lying) && pelvis != Vector3.Zero;
+            _poseCheck = !float.IsNaN(lying) && pelvis != Vector3.Zero;
         }
 
         private void PoseNow()
         {
             if (!Crew.Alive(_body)) return;
 
-            float twist;
-            Vector3 local;
-
-            if (!Twist.TryGetValue(_poseClip, out twist)) twist = 0f;
-            if (!PelvisAt.TryGetValue(_poseClip, out local)) local = Vector3.Zero;
-
-            var heading = float.IsNaN(_poseLying) ? _body.Heading : _poseLying - twist;
+            var heading = float.IsNaN(_poseLying) ? _body.Heading : _poseLying - _twist;
 
             var root = _body.Position;
 
             if (_posePelvis != Vector3.Zero)
             {
-                var p = _posePelvis - Motion.Rotate(local, heading);
+                var p = _posePelvis - Motion.Rotate(_local, heading);
                 root = new Vector3(p.X, p.Y, root.Z);
             }
 
@@ -913,14 +962,27 @@ namespace CodeThree.Scene
                 var root = _body.Position;
                 var heading = _body.Heading;
 
-                Twist[_poseClip] = Motion.Wrap(lyingNow - heading);
-                PelvisAt[_poseClip] = Motion.Rotate(Motion.Flat(pelvisNow - root), -heading);
+                var twist = Motion.Wrap(lyingNow - heading);
+                var local = Motion.Rotate(Motion.Flat(pelvisNow - root), -heading);
 
                 var turned = Math.Abs(Motion.Wrap(lyingNow - _poseLying));
                 var moved = Motion.FlatDistance(pelvisNow, _posePelvis);
 
-                Log.Debug("Measured " + _poseClip + ": off by " + turned.ToString("0") + " degrees and " +
-                          moved.ToString("0.00") + "m" + (turned > 12f || moved > 0.25f ? "; re-placed." : "."));
+                // BOUNDED, OR NOT USED. A pelvis more than a metre and a bit from its own root
+                // is not a lying pose being measured, it is a skeleton and an entity read from
+                // two different places -- and a turn past a right angle is the same thing seen
+                // the other way. Either is logged and ignored; the pose stands as placed.
+                var plausible = local.Length() <= 1.2f && turned <= 90f && moved <= 1.5f;
+
+                Log.Info("Posed " + _poseClip + ": he moved " + moved.ToString("0.00") + "m and turned " +
+                         turned.ToString("0") + " degrees going into it" +
+                         (!plausible ? " -- implausible, not corrected." :
+                          turned > 12f || moved > 0.25f ? "; re-placed." : "."));
+
+                if (!plausible) return;
+
+                _twist = twist;
+                _local = local;
 
                 if (turned > 12f || moved > 0.25f) PoseNow();
             }
@@ -1454,7 +1516,10 @@ namespace CodeThree.Scene
                 float along;
                 Lay_out(out spot, out along);
 
-                if (!_trolley.Bring(spot, along)) _carrying = true;
+                Vector3 pelvis;
+                var nearZ = Crew.Pelvis(_body, out pelvis) ? pelvis.Z - 0.1f : _body.Position.Z;
+
+                if (!_trolley.Bring(spot, along, nearZ)) _carrying = true;
             }
 
             if (now - _stepAt < _cfg.FetchMs) return;
@@ -1467,14 +1532,24 @@ namespace CodeThree.Scene
             Vector3 end;
             float ignored;
 
-            if (_scene == null || !_scene.Mark(Anim.LiftDict, Anim.LiftBody, 1f, out end, out ignored))
+            // WHERE HE ACTUALLY IS, BEFORE WHERE THE CLIP SAYS HE WILL BE. His pelvis is a fact;
+            // the clip's end mark is a prediction from the engine that was once fourteen metres
+            // out, and the trolley was laid out beside that prediction -- up a bank, by a fence,
+            // "in the sky". The prediction is used when it is within a few metres of him, which
+            // is what a lift does, and otherwise he is where the trolley goes.
+            Vector3 pelvis;
+            if (!Crew.Pelvis(_body, out pelvis)) pelvis = _body.Position;
+
+            if (_scene == null || !_scene.Mark(Anim.LiftDict, Anim.LiftBody, 1f, out end, out ignored) ||
+                Motion.FlatDistance(end, pelvis) > 3f)
             {
-                end = _body.Position;
+                end = pelvis;
             }
 
             var stance = Vector3.Zero;
             var haveStance = _scene != null &&
-                             _scene.Mark(Anim.LiftDict, Anim.LiftMedic, 0f, out stance, out ignored);
+                             _scene.Mark(Anim.LiftDict, Anim.LiftMedic, 0f, out stance, out ignored) &&
+                             Motion.FlatDistance(stance, pelvis) <= 3f;
 
             var line = haveStance ? Motion.Flat(end - stance) : Motion.Facing(_body.Heading);
             if (line.Length() < 0.3f) line = Motion.Facing(_body.Heading);
@@ -1565,18 +1640,19 @@ namespace CodeThree.Scene
                 var medicOff = Crew.Alive(_driver) && _walkTo != Vector3.Zero
                              ? Motion.FlatDistance(_driver.Position, _walkTo) : -1f;
 
-                Vector3 expect;
-                float ignored;
-                var patientOff = -1f;
-
-                if (_scene.Mark(Anim.LiftDict, Anim.LiftBody, 0f, out expect, out ignored))
-                {
-                    patientOff = Motion.FlatDistance(_body.Position, expect);
-                }
+                // HOW FAR THE PATIENT HAS MOVED SINCE HE WAS POSED FOR THIS, which is the number
+                // that means something. "How far from where the scene expects him" was measured
+                // after the scene had already put him there, and so read nought whatever had
+                // happened -- except the one time it read fourteen metres, which was him NOT
+                // yet moved to a scene fourteen metres away.
+                Vector3 pelvis;
+                var patientMoved = _posePelvis != Vector3.Zero && Crew.Pelvis(_body, out pelvis)
+                                 ? Motion.FlatDistance(pelvis, _posePelvis) : -1f;
 
                 Log.Info("The lift starts: medic " + (medicOff < 0 ? "?" : medicOff.ToString("0.00") + "m") +
-                         " off his mark, patient " + (patientOff < 0 ? "?" : patientOff.ToString("0.00") + "m") +
-                         " off the scene.");
+                         " off his mark; the patient has moved " +
+                         (patientMoved < 0 ? "?" : patientMoved.ToString("0.00") + "m") +
+                         " since he was laid out for it.");
             }
             catch
             {
@@ -1797,25 +1873,33 @@ namespace CodeThree.Scene
 
         private void Wheeling(int now)
         {
-            // The doors, as the trolley sets off towards them -- see Fetching for why not before.
-            if (Entering()) Doors(true);
-
+            // THE DOORS STAY SHUT UNTIL HE IS AT THEM. See Stowing: they open when the trolley
+            // arrives at the rear, the way a crew actually does it, and not a moment before.
             if (!_carrying)
             {
                 // The shopping-trolley pose on his upper body, over the walk his task gives him;
                 // and the trolley in front of him at the road's height, every tick.
-                Anim.Play(_driver, Anim.PushDict, Anim.PushClip, Anim.Push);
+                //
+                // AND THE STRONGER FLAGS IF THE FIRST ARE REFUSED. The log said the pose was not
+                // taking: the navmesh walk clears a secondary clip when it starts a new leg,
+                // and re-issuing every tick just restarts it on frame nought. A second in with
+                // nothing on him, it is re-issued not-interruptable, which the movement task
+                // leaves alone. See Anim.PushHard.
+                var playing = Anim.IsPlaying(_driver, Anim.PushDict, Anim.PushClip);
+
+                if (!playing && !_pushHard && now - _stepAt > 1000)
+                {
+                    _pushHard = true;
+                    Anim.Stop(_driver, Anim.PushDict, Anim.PushClip);
+                }
+
+                Anim.Play(_driver, Anim.PushDict, Anim.PushClip, _pushHard ? Anim.PushHard : Anim.Push);
                 _trolley.Follow();
 
-                // IF THE POSE IS NOT ON HIM A SECOND IN, THE LOG SAYS SO. An upper-body clip in
-                // the secondary slot is meant to sit over a walk, and if the walk task is
-                // refusing it there is nothing to see but a man walking normally with a trolley
-                // in front of him -- which is the report, and which this line would explain.
-                if (!_pushWarned && now - _stepAt > 1000 &&
-                    !Anim.IsPlaying(_driver, Anim.PushDict, Anim.PushClip))
+                if (!_pushWarned && _pushHard && now - _stepAt > 2500 && !playing)
                 {
                     _pushWarned = true;
-                    Log.Warn("The pushing pose is not taking on the medic while he walks.");
+                    Log.Warn("The pushing pose is not taking on the medic even not-interruptable.");
                 }
             }
 
@@ -1832,71 +1916,145 @@ namespace CodeThree.Scene
         /// It used to be attached straight into the van, which moved it two metres in one frame.
         /// It rolls now, and the attach happens where the roll ends.
         /// </summary>
+        /// <summary>
+        /// At the rear of the van: the doors open, the trolley goes in, the doors close, both
+        /// men get in, and it goes once both are actually in it.
+        ///
+        /// IN THAT ORDER, AND EACH STEP WAITS FOR THE ONE BEFORE. The doors are asked to open
+        /// and the roll does not start until GET_VEHICLE_DOOR_ANGLE_RATIO says they are; the
+        /// trolley is eased in and only attached where the roll ends; the doors are asked to
+        /// close and nobody is sent to a seat until they have; and the van does not move until
+        /// IsInVehicle is true for both of them. Every wait has a ceiling, because a door the
+        /// model does not have never reports open and a man who cannot path to his seat never
+        /// arrives -- but the ceiling is the fallback, not the plan.
+        /// </summary>
         private void Stowing(int now)
         {
             if (Entering())
             {
                 _kit.Release();
+                Anim.Stop(_driver, Anim.PushDict, Anim.PushClip);
 
-                if (_carrying)
-                {
-                    InVan();
-                    _rolled = true;
-                    Aboard(now);
-                    return;
-                }
+                Doors(true);
 
-                _trolley.RollFrom();
-                _rolled = false;
-                _sceneAt = now;
+                _stow = Stow.Opening;
+                _stowAt = now;
                 return;
             }
 
-            if (!_rolled)
+            switch (_stow)
             {
-                var t = (now - _sceneAt) / (float)RollMs;
+                case Stow.Opening:
+                    if (!DoorsAre(true) && now - _stowAt < 2500) return;
 
-                if (t < 1f)
+                    if (_carrying)
+                    {
+                        InVan();
+                        _stow = Stow.Closing;
+                        _stowAt = now;
+                        Doors(false);
+                        return;
+                    }
+
+                    _trolley.RollFrom();
+                    _stow = Stow.Rolling;
+                    _stowAt = now;
+                    return;
+
+                case Stow.Rolling:
                 {
-                    _trolley.Roll(_van, Motion.Smooth(t));
+                    var t = (now - _stowAt) / (float)RollMs;
+
+                    if (t < 1f)
+                    {
+                        _trolley.Roll(_van, Motion.Smooth(t));
+                        return;
+                    }
+
+                    if (!_trolley.Stow(_van)) InVan();
+
+                    Doors(false);
+
+                    _stow = Stow.Closing;
+                    _stowAt = now;
                     return;
                 }
 
-                if (!_trolley.Stow(_van)) InVan();
+                case Stow.Closing:
+                    if (!DoorsAre(false) && now - _stowAt < 2500) return;
 
-                _rolled = true;
-                Aboard(now);
-                return;
+                    Board(_driver, -1);
+                    Board(_mate, 0);
+
+                    _stow = Stow.Boarding;
+                    _stowAt = now;
+                    return;
+
+                case Stow.Boarding:
+                {
+                    // BOTH IN, OR LONG ENOUGH THAT ONE OF THEM IS NOT COMING. The second man can
+                    // be blocked by the player, a bin, a passing car; the van goes without him
+                    // at the ceiling rather than sitting there for the rest of the session, and
+                    // he is handed back to the city at the end like everybody else.
+                    var driverIn = Crew.Alive(_driver) && _driver.IsInVehicle(_van);
+                    var mateIn = !Crew.Alive(_mate) || _mate.IsInVehicle(_van);
+
+                    if (!(driverIn && mateIn) && now - _stowAt < _cfg.StowMs + _cfg.BoardMs) return;
+
+                    if (!driverIn)
+                    {
+                        // Without the driver in his seat there is no drive. He is put in it.
+                        Function.Call(Hash.TASK_WARP_PED_INTO_VEHICLE, _driver.Handle, _van.Handle, -1);
+                    }
+
+                    if (!mateIn) Log.Info("The second man did not make it back to the van; it goes without him.");
+
+                    _to = Hospitals.Nearest(_van.Position);
+
+                    To(Step.Driving, now);
+
+                    Function.Call(Hash.SET_VEHICLE_SIREN, _van.Handle, false);
+                    Drive(_to, 20f);
+
+                    Log.Info("They are taking him to the hospital, " + (int)_van.Position.DistanceTo(_to) + "m away.");
+
+                    if (Say != null && Near()) Say("The ambulance leaves for the hospital.");
+                    return;
+                }
             }
-
-            if (now - _boardAt < _cfg.StowMs) return;
-
-            _to = Hospitals.Nearest(_van.Position);
-
-            To(Step.Driving, now);
-
-            Function.Call(Hash.SET_VEHICLE_SIREN, _van.Handle, false);
-            Drive(_to, 20f);
-
-            Log.Info("They are taking him to the hospital, " + (int)_van.Position.DistanceTo(_to) + "m away.");
-
-            if (Say != null && Near()) Say("The ambulance leaves for the hospital.");
         }
 
-        private void Aboard(int now)
+        /// <summary>
+        /// Whether the rear doors have finished going the way they were asked.
+        ///
+        /// Asked of the door the model actually has: the ratio comes back nought for a door
+        /// that does not exist, which reads as "closed", so an ambulance with a boot and no rear
+        /// pair reports on the boot and the pair say nothing.
+        /// </summary>
+        private bool DoorsAre(bool open)
         {
-            Anim.Stop(_driver, Anim.PushDict, Anim.PushClip);
+            if (!Crew.Alive(_van)) return true;
 
-            // DOORS SHUT BEFORE ANYBODY IS SENT TO A SEAT. They used to close after the boarding
-            // timer, so both men were routed round to the cab past two open rear doors, and
-            // the one who was standing between them got stuck. The trolley is in; there is
-            // nothing left for them to be open for.
-            Doors(false);
+            foreach (var door in new[] { 2, 3, 5 })
+            {
+                try
+                {
+                    var ratio = Function.Call<float>(Hash.GET_VEHICLE_DOOR_ANGLE_RATIO, _van.Handle, door);
 
-            Board(_driver, -1);
-            Board(_mate, 0);
+                    // Opening: a door part way through its swing is not there yet. Closing: a
+                    // door still ajar is not there yet. A door reading nought either way is one
+                    // this model does not have, and says nothing.
+                    if (open && ratio > 0.05f && ratio < 0.85f) return false;
+                    if (!open && ratio > 0.1f) return false;
+                }
+                catch
+                {
+                    // This model does not have that door.
+                }
+            }
 
-            _boardAt = now;
+            // No door mid-swing, or no rear door on this model at all: nothing left to wait for.
+            return true;
         }
 
         private void InVan()
@@ -1990,6 +2148,42 @@ namespace CodeThree.Scene
             if (why != null) Log.Info("The call-out ended: " + why + ".");
 
             Done();
+        }
+
+        /// <summary>Whether a vehicle the engine calls dead is, on inspection, fine.</summary>
+        private static bool Sound(Vehicle van)
+        {
+            try
+            {
+                if (van == null || !van.Exists()) return false;
+
+                return Health(van) > 300 && !Function.Call<bool>(Hash.IS_ENTITY_ON_FIRE, van.Handle);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static int Health(Entity what)
+        {
+            try { return Function.Call<int>(Hash.GET_ENTITY_HEALTH, what.Handle); }
+            catch { return -1; }
+        }
+
+        /// <summary>What became of a man who failed the Alive check, for the log.</summary>
+        private static string Fate(Ped who)
+        {
+            try
+            {
+                if (who == null || !who.Exists()) return "deleted -- something removed him";
+
+                return "killed (health " + Health(who) + ")";
+            }
+            catch
+            {
+                return "lost";
+            }
         }
 
         private static string HowLost(Vehicle van)
@@ -2176,6 +2370,8 @@ namespace CodeThree.Scene
             _poseCheck = false;
             _groundWarned = false;
             _pushWarned = false;
+            _pushHard = false;
+            _vanDoubted = false;
             _squared = false;
             _vanAt = Vector3.Zero;
             _scene = null;
