@@ -385,6 +385,79 @@ namespace CodeThree.Core
             }
         }
 
+        /// <summary>
+        /// Walks somebody to a spot, round whatever is in the way, and turns him at the end.
+        ///
+        /// NAVMESH, NOT A STRAIGHT LINE. Every walk in the scene used TASK_GO_STRAIGHT_TO_COORD,
+        /// which does exactly what it says: it walks in a straight line and stops against the
+        /// first thing it meets. That thing was an open ambulance door -- the rear doors were
+        /// opened early and swing out a metre either side, and a man sent straight at a point
+        /// behind the bumper walked into one and stood there pushing against it until his
+        /// timeout. The navmesh task paths round doors, the trolley, the bag and each other.
+        ///
+        /// Flags 2 + 512: slide to the exact coordinate and take up the heading at the end, and
+        /// stop exactly there rather than within a radius. The trailing 40000 is what every
+        /// script in the game passes and nobody has documented.
+        /// </summary>
+        public static void WalkTo(Ped who, Vector3 at, float heading, float speed, int ms)
+        {
+            try
+            {
+                if (!Alive(who)) return;
+
+                var z = Ground(at, at.Z);
+
+                Function.Call(Hash.TASK_FOLLOW_NAV_MESH_TO_COORD_ADVANCED, who.Handle,
+                              at.X, at.Y, z, speed, ms, 0.25f, 2 | 512, heading, 40000f);
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not send him walking: " + ex.Message);
+            }
+        }
+
+        /// <summary>The same, without caring which way he ends up facing.</summary>
+        public static void WalkTo(Ped who, Vector3 at, float speed, int ms)
+        {
+            try
+            {
+                if (!Alive(who)) return;
+
+                var z = Ground(at, at.Z);
+
+                Function.Call(Hash.TASK_FOLLOW_NAV_MESH_TO_COORD, who.Handle,
+                              at.X, at.Y, z, speed, ms, 0.4f, 0, 40000f);
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not send him walking: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// How far something is above the road, negative when it is under it.
+        ///
+        /// The check that catches a scene placed below the world. It should never fire now
+        /// that scene origins sit on the ground -- and if it ever does, the log says which step
+        /// and by how much, which is the whole of the diagnosis.
+        /// </summary>
+        public static float Above(Entity what)
+        {
+            try
+            {
+                if (!There(what)) return 0f;
+
+                var at = what.Position;
+                var ground = Ground(at, at.Z);
+
+                return at.Z - ground;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
         /// <summary>Hands a ped or a vehicle back to the game to clean up in its own time.</summary>
         public static void Give(Entity what)
         {

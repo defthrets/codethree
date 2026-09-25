@@ -262,8 +262,27 @@ namespace CodeThree.Core
         ///
         /// And the settings screen can stage one in front of you, because this scene was nearly
         /// untestable -- a murder, then two minutes, then a third of the time no van.
+        ///
+        /// 0.4.1 -- on the ground, round the doors, and a van that comes back.
+        ///
+        /// Both men dropped through the road the moment a scene started: the scene's origin was
+        /// solved for Z the same way as X and Y, by taking the clip's initial offset away from
+        /// where the patient lay, and whatever that native reports for Z is not the distance
+        /// from the scene floor to the root. The origin's height is the road now, full stop.
+        ///
+        /// The crew stood pushing against their own rear doors: every walk was a straight line,
+        /// the doors were opened a minute early and swing out a metre either side, and a man
+        /// sent straight at the bumper hit one and waited out his timeout. Every walk is a
+        /// navmesh walk now, the doors open only as the trolley sets off and shut before anybody
+        /// is sent to a seat, and the second man is sent to the cab rather than the door's arc.
+        ///
+        /// And the van is being deleted mid-scene by something that is not this mod -- three
+        /// times in one evening during the CPR, with nothing of ours near it and no sweeper to
+        /// be found in any config file on the machine. It cannot be stopped from here. So it is
+        /// noticed on the next tick and another ambulance is put back where that one stood; the
+        /// crew are on foot and not looking.
         /// </summary>
-        public const string Version = "0.4.0";
+        public const string Version = "0.4.1";
 
         /// <summary>The word on the splash row and at the top of the log.</summary>
         public const string Name = "Code Three";

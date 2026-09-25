@@ -109,7 +109,15 @@ namespace CodeThree.Core
                 var h = heading - rot.Z;
                 var turned = Motion.Rotate(off, h);
 
-                return new Sync(new Vector3(at.X - turned.X, at.Y - turned.Y, at.Z - off.Z), h);
+                // THE ORIGIN'S HEIGHT IS THE GROUND, FULL STOP. The first draft solved Z the
+                // same way as X and Y -- take the clip's initial offset away from where he is --
+                // and both men dropped through the road the moment the scene started. Whatever
+                // the native reports for Z is not the plain distance from the scene floor to
+                // the root, and subtracting it put the floor of the scene a body's height under
+                // the real one, with every participant placed relative to it. A clip that kneels
+                // or lies starts on the scene's floor; the floor is the road; so the road's
+                // height is the origin's, and only X and Y are solved.
+                return new Sync(new Vector3(at.X - turned.X, at.Y - turned.Y, at.Z), h);
             }
             catch (Exception ex)
             {

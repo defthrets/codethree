@@ -169,6 +169,30 @@ namespace CodeThree.Scene
         private bool _vanLost;
         private bool _mateBusy;
 
+        /// <summary>Whether the second man has been sent walking from the van yet.</summary>
+        private bool _mateOut;
+
+        /// <summary>When he was sent to his spot beside the body, so he is not waited on forever.</summary>
+        private int _mateAt;
+
+        /// <summary>
+        /// Where the van last was, so one can be put back if it is taken away.
+        ///
+        /// THE VAN IS BEING DELETED MID-SCENE AND NOTHING IN THIS MOD DOES IT. Three times in
+        /// one evening "the van was deleted while working on him" -- during the CPR, before the
+        /// trolley exists, with nothing of ours touching it. It is a mission entity, held and
+        /// re-held, and it still goes. Whatever takes it -- a sweeper in another mod's dll, an
+        /// ASI with no ini -- cannot be found in any config file on this machine, and this mod
+        /// cannot stop it. What it can do is notice on the next tick and put another ambulance
+        /// back where that one stood. The crew are on foot and not looking at it.
+        /// </summary>
+        private Vector3 _vanAt;
+        private float _vanHeading;
+        private int _heldAt;
+
+        /// <summary>Warned once per step about somebody under the floor, so the log is not a torrent.</summary>
+        private bool _groundWarned;
+
         private Sync _scene;
         private Beat[] _beats;
         private int _beat;
@@ -332,9 +356,14 @@ namespace CodeThree.Scene
                 _bodyInVan = false;
                 _ours = false;
                 _mateBusy = false;
+                _mateOut = false;
                 _vanLost = false;
                 _walk = Walk.None;
                 _poseCheck = false;
+                _groundWarned = false;
+                _vanAt = from;
+                _vanHeading = _van.Heading;
+                _heldAt = Game.GameTime;
 
                 Drive(_at, _cfg.ThereRange * 0.6f);
 
@@ -387,19 +416,42 @@ namespace CodeThree.Scene
                 // only the steps that need somewhere to put him give up.
                 if (!Crew.Alive(_van))
                 {
-                    if (!_vanLost)
+                    // TAKEN AWAY WITH THE CREW ON FOOT: another one goes back where it stood.
+                    // Between the crew getting out and the trolley rolling in, the van is a
+                    // parked prop nobody is looking at, and a replacement in the same spot is
+                    // indistinguishable from the original. See _vanAt.
+                    if (_step >= Step.Reaching && _step <= Step.Stowing && Revan())
                     {
-                        _vanLost = true;
                         Log.Warn("The van was " + HowLost(_van) + " while " + State +
-                                 ". The crew carry on without it.");
+                                 "; another was put back where it stood.");
                     }
-
-                    if (_step == Step.Coming || _step >= Step.Fetching)
+                    else
                     {
-                        OnFoot("there is no van to put him in");
-                        return;
+                        if (!_vanLost)
+                        {
+                            _vanLost = true;
+                            Log.Warn("The van was " + HowLost(_van) + " while " + State +
+                                     ". The crew carry on without it.");
+                        }
+
+                        if (_step == Step.Coming || _step >= Step.Fetching)
+                        {
+                            OnFoot("there is no van to put him in");
+                            return;
+                        }
                     }
                 }
+                else
+                {
+                    _vanAt = _van.Position;
+                    _vanHeading = _van.Heading;
+
+                    // RE-HELD EVERY COUPLE OF SECONDS. Cheap, and if whatever is deleting the van
+                    // works by clearing the mission flag first, this is the counter to it.
+                    if (now - _heldAt > 2000) { Crew.Hold(_van); _heldAt = now; }
+                }
+
+                Grounded();
 
                 var me = Game.Player.Character;
                 var anchor = Crew.Alive(_van) ? _van.Position : _at;
@@ -440,6 +492,86 @@ namespace CodeThree.Scene
             _stepAt = now;
             _entering = true;
             _walk = Walk.None;
+            _groundWarned = false;
+        }
+
+        /// <summary>
+        /// Another ambulance, where the last one was standing.
+        ///
+        /// The model was released after the first spawn and may need a moment from disk; the
+        /// patient is held and every dictionary is already in memory, so a yield here costs a
+        /// frame and nothing else.
+        /// </summary>
+        private bool Revan()
+        {
+            try
+            {
+                if (_vanAt == Vector3.Zero) return false;
+
+                var model = Crew.Load(Crew.Van, 600);
+                if (model == null) return false;
+
+                var van = World.CreateVehicle(model.Value, _vanAt, _vanHeading);
+                model.Value.MarkAsNoLongerNeeded();
+
+                if (!Crew.Alive(van)) return false;
+
+                Crew.Hold(van);
+                van.IsEngineRunning = true;
+
+                Function.Call(Hash.SET_VEHICLE_ON_GROUND_PROPERLY, van.Handle);
+                Function.Call(Hash.SET_VEHICLE_LIGHTS, van.Handle, 2);
+
+                _van = van;
+                _heldAt = Game.GameTime;
+
+                if (_step >= Step.Wheeling) Doors(true);
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not put the van back: " + ex.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Nobody under the floor. Should never fire now the scenes sit on the ground; if it
+        /// does, the log says which step and by how much, and the man is lifted back up.
+        /// </summary>
+        private void Grounded()
+        {
+            if (_step < Step.Working || _step > Step.Loading) return;
+
+            try
+            {
+                Lift(_body, "the patient");
+                Lift(_driver, "the medic");
+            }
+            catch
+            {
+                // Diagnostic only.
+            }
+        }
+
+        private void Lift(Ped who, string name)
+        {
+            if (!Crew.Alive(who)) return;
+
+            var above = Crew.Above(who);
+            if (above > -0.45f) return;
+
+            if (!_groundWarned)
+            {
+                _groundWarned = true;
+                Log.Warn(name + " was " + (-above).ToString("0.00") + "m under the road while " +
+                         State + "; lifted back up.");
+            }
+
+            var at = who.Position;
+            Function.Call(Hash.SET_ENTITY_COORDS_NO_OFFSET, who.Handle,
+                          at.X, at.Y, at.Z - above, false, false, false);
         }
 
         private bool Entering()
@@ -571,14 +703,11 @@ namespace CodeThree.Scene
             {
                 Function.Call(Hash.TASK_LEAVE_VEHICLE, who.Handle, _van.Handle, 0);
 
-                if (spot.HasValue)
-                {
-                    var s = spot.Value;
-
-                    Function.Call(Hash.TASK_GO_STRAIGHT_TO_COORD, who.Handle,
-                                  s.X, s.Y, s.Z, 1.8f, _reachMs, 0f, 0.4f);
-                    return;
-                }
+                // A MAN WITH A SPOT TO GO TO IS SENT THERE ONCE HE IS OUT. Giving him the walk on
+                // the same tick as the leave replaces the leave, and a navmesh walk issued to a
+                // man still in his seat is a man who stays in his seat. Reaching watches for him
+                // to be out of the cab and sends him then.
+                if (spot.HasValue) return;
 
                 if (Crew.There(_body))
                 {
@@ -587,8 +716,7 @@ namespace CodeThree.Scene
                     return;
                 }
 
-                Function.Call(Hash.TASK_GO_STRAIGHT_TO_COORD, who.Handle,
-                              _at.X, _at.Y, _at.Z, 1.8f, _reachMs, 0f, 0.5f);
+                Crew.WalkTo(who, _at, 1.8f, _reachMs);
             }
             catch (Exception ex)
             {
@@ -623,6 +751,16 @@ namespace CodeThree.Scene
         private void Reaching(int now)
         {
             if (!Crew.There(_body)) { Leave(now, "the body had gone"); return; }
+
+            // The second man, once he is actually out of the cab: to his side of the body,
+            // round the doors rather than through them, turning to face the patient at the end.
+            if (!_mateOut && Crew.Alive(_mate) && !_mate.IsInVehicle())
+            {
+                _mateOut = true;
+
+                var flank = Flank();
+                Crew.WalkTo(_mate, flank, Motion.HeadingOf(Motion.Flat(_body.Position - flank)), 1.6f, _reachMs);
+            }
 
             var close = Crew.Alive(_driver) &&
                         _driver.Position.DistanceTo(_body.Position) < _cfg.KneelRange;
@@ -659,16 +797,7 @@ namespace CodeThree.Scene
 
             _walkTo = at;
 
-            try
-            {
-                Function.Call(Hash.CLEAR_PED_TASKS, who.Handle);
-                Function.Call(Hash.TASK_GO_STRAIGHT_TO_COORD, who.Handle,
-                              at.X, at.Y, Crew.Ground(at, at.Z), 1f, MarkMs, heading, 0.5f);
-            }
-            catch
-            {
-                _walk = Walk.There;
-            }
+            Crew.WalkTo(who, at, heading, 1f, MarkMs);
         }
 
         private bool Approached(Ped who, int now)
@@ -824,7 +953,7 @@ namespace CodeThree.Scene
                 return;
             }
 
-            if (!_mateBusy) Look(_mate);
+            if (!_mateBusy) Settle_(now);
 
             // STILL SETTING UP: the patient posed and held, the medic walking to his mark.
             if (_beat < 0)
@@ -1031,25 +1160,64 @@ namespace CodeThree.Scene
             return age > beat.Ms;
         }
 
-        /// <summary>The second man: bag down beside him, then kneeling, tending, on the far side.</summary>
+        /// <summary>
+        /// The second man: the bag down beside him, and himself to the far side if he is not
+        /// there yet. The kneeling waits for him to arrive -- see Settle_.
+        ///
+        /// HE USED TO KNEEL WHEREVER HE HAPPENED TO BE STANDING, which after a straight-line
+        /// walk that hit a door was often halfway back to the van, facing the wrong way. The
+        /// scenario is started where he is, so where he is has to be right first.
+        /// </summary>
         private void Mate_()
         {
+            _mateBusy = false;
+            _mateAt = Game.GameTime;
+
             if (!Crew.Alive(_mate) || !Crew.There(_body)) return;
 
             try
             {
-                if (_kit.There) _kit.SetDown(Flank() + (_at - Flank()).Normalized * 0.9f);
+                var flank = Flank();
 
-                var at = _body.Position - _mate.Position;
+                if (_kit.There) _kit.SetDown(flank + Motion.Flat(_at - flank).Normalized * 0.9f);
+
+                if (Motion.FlatDistance(_mate.Position, flank) > 0.7f)
+                {
+                    Crew.WalkTo(_mate, flank, Motion.HeadingOf(Motion.Flat(_body.Position - flank)), 1.4f, 6000);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("The second man could not be sent over: " + ex.Message);
+            }
+        }
+
+        /// <summary>Kneeling, tending, the moment he is on his spot -- or after six seconds of trying.</summary>
+        private void Settle_(int now)
+        {
+            if (!Crew.Alive(_mate) || !Crew.There(_body)) { _mateBusy = true; return; }
+
+            var flank = Flank();
+            var there = Motion.FlatDistance(_mate.Position, flank) < 0.7f;
+
+            if (!there && now - _mateAt < 6000) return;
+
+            try
+            {
+                var at = Motion.Flat(_body.Position - _mate.Position);
                 if (at.Length() > 0.2f) _mate.Heading = Motion.HeadingOf(at);
 
                 _mateBusy = Anim.Scenario(_mate, Anim.TendScenario);
+
+                if (!_mateBusy) Look(_mate);
             }
             catch (Exception ex)
             {
                 Log.Debug("The second man could not settle: " + ex.Message);
-                _mateBusy = false;
             }
+
+            // Whether it took or not, he is not asked again this scene.
+            _mateBusy = true;
         }
 
         private void Look(Ped who)
@@ -1270,8 +1438,10 @@ namespace CodeThree.Scene
 
             if (Entering())
             {
-                Doors(true);
-
+                // THE DOORS STAY SHUT UNTIL THE TROLLEY IS COMING. They used to be opened here,
+                // a full minute before anybody went near the van, and an ambulance's rear doors
+                // swing out a metre either side -- so every walk to the back of it ended against
+                // a door. They open when the wheeling starts; see Wheeling.
                 if (_kit.There) _kit.Bring(_mate);
 
                 Vector3 spot;
@@ -1386,10 +1556,7 @@ namespace CodeThree.Scene
 
                 var at = _trolley.Where + away.Normalized * 0.8f;
 
-                Function.Call(Hash.CLEAR_PED_TASKS, _mate.Handle);
-                Function.Call(Hash.TASK_GO_STRAIGHT_TO_COORD, _mate.Handle,
-                              at.X, at.Y, Crew.Ground(at, at.Z), 1f, 5000,
-                              Motion.HeadingOf(-away), 0.3f);
+                Crew.WalkTo(_mate, at, Motion.HeadingOf(-away), 1f, 5000);
             }
             catch
             {
@@ -1529,17 +1696,7 @@ namespace CodeThree.Scene
         /// <summary>Walks somebody to an exact spot, on the ground, turning to a heading at the end.</summary>
         private static void Step_(Ped who, Vector3 to, float heading, int ms)
         {
-            if (!Crew.Alive(who)) return;
-
-            try
-            {
-                Function.Call(Hash.TASK_GO_STRAIGHT_TO_COORD, who.Handle,
-                              to.X, to.Y, Crew.Ground(to, to.Z), 1f, ms, heading, 0.3f);
-            }
-            catch
-            {
-                // The deadline moves it on regardless.
-            }
+            Crew.WalkTo(who, to, heading, 1f, ms);
         }
 
         // ---- to the van --------------------------------------------------------
@@ -1574,12 +1731,19 @@ namespace CodeThree.Scene
 
             Step_(_driver, _stopAt, _van.Heading, _cfg.WheelMs);
 
-            var side = Crew.Offset(_van, 1.6f, _vanRear + 0.8f, 0f);
-            Step_(_mate, side, _van.Heading - 90f, _cfg.WheelMs);
+            // THE SECOND MAN GOES TO THE CAB, NOT THE BACK. He was sent to a spot beside the rear
+            // corner, which is exactly the arc the right-hand door swings through, and he stood
+            // in it with the door in his face. Beside the passenger door there is nothing to
+            // stand in, and it is where he is getting in anyway.
+            var side = Crew.Offset(_van, 1.9f, 1.2f, 0f);
+            Step_(_mate, side, _van.Heading + 90f, _cfg.WheelMs);
         }
 
         private void Wheeling(int now)
         {
+            // The doors, as the trolley sets off towards them -- see Fetching for why not before.
+            if (Entering()) Doors(true);
+
             if (!_carrying)
             {
                 // The shopping-trolley pose on his upper body, over the walk his task gives him;
@@ -1640,8 +1804,6 @@ namespace CodeThree.Scene
 
             if (now - _boardAt < _cfg.StowMs) return;
 
-            Doors(false);
-
             _to = Hospitals.Nearest(_van.Position);
 
             To(Step.Driving, now);
@@ -1657,6 +1819,12 @@ namespace CodeThree.Scene
         private void Aboard(int now)
         {
             Anim.Stop(_driver, Anim.PushDict, Anim.PushClip);
+
+            // DOORS SHUT BEFORE ANYBODY IS SENT TO A SEAT. They used to close after the boarding
+            // timer, so both men were routed round to the cab past two open rear doors, and
+            // the one who was standing between them got stuck. The trolley is in; there is
+            // nothing left for them to be open for.
+            Doors(false);
 
             Board(_driver, -1);
             Board(_mate, 0);
@@ -1935,9 +2103,12 @@ namespace CodeThree.Scene
             _bodyInVan = false;
             _ours = false;
             _mateBusy = false;
+            _mateOut = false;
             _vanLost = false;
             _walk = Walk.None;
             _poseCheck = false;
+            _groundWarned = false;
+            _vanAt = Vector3.Zero;
             _scene = null;
         }
 
