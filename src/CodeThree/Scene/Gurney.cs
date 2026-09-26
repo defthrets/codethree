@@ -100,8 +100,15 @@ namespace CodeThree.Scene
         /// </summary>
         private const float MostLift = 1.5f;
 
-        /// <summary>A lying man's pelvis sits about this far above whatever he is lying on.</summary>
-        private const float PelvisAboveBed = 0.12f;
+        /// <summary>
+        /// A lying man's pelvis sits about this far above whatever he is lying on.
+        ///
+        /// TWENTY, NOT TWELVE. Twelve is right for a road; this gurney has a mattress the better
+        /// part of a hand thick on top of the frame the bounding box measures, and at twelve he
+        /// lay in it rather than on it. The height is measured against this every time he is
+        /// laid down, so this one number is the whole of "up a touch".
+        /// </summary>
+        private const float PelvisAboveBed = 0.20f;
 
         /// <summary>Half its length along the long axis.</summary>
         private float _halfLength = 1f;
@@ -226,7 +233,12 @@ namespace CodeThree.Scene
                     // wall, a probe that found a roof -- and that is the trolley in the sky. A
                     // man lying beside it is at road height by definition, so anything more
                     // than a metre and a half from him is not the road, and his height is used.
-                    var ground = Crew.Ground(at, nearZ);
+                    // PROBED FROM THE PATIENT'S HEIGHT, NOT THE SPOT'S. The spot's Z comes from
+                    // the lift clip's end mark, which carries the clip's metre-high root, so a
+                    // probe started from there began under a canopy or a first-floor slab and
+                    // found that instead of the road -- 1.9m out, every time, and the warning
+                    // below firing on every call-out for a trolley that ended up fine anyway.
+                    var ground = Crew.Ground(new Vector3(at.X, at.Y, nearZ), nearZ);
 
                     if (Math.Abs(ground - nearZ) > 1.5f)
                     {

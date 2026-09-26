@@ -316,8 +316,15 @@ namespace CodeThree.Core
         /// constant is not noise. The turn is applied whatever its size, the height is measured
         /// off his pelvis and the scene lifted by it, and the trolley's fit accepts a root
         /// convention of up to a metre and a half.
+        ///
+        /// 0.4.5 -- in behind him, and up a touch.
+        ///
+        /// The lift comes from behind now -- in at the head, arms under the shoulders -- which
+        /// is how a casualty goes onto a stretcher, rather than face to face, which is how a
+        /// friend is helped up. And a lying pelvis is held twenty centimetres above the canvas
+        /// rather than twelve, because this gurney has a mattress and at twelve he lay in it.
         /// </summary>
-        public const string Version = "0.4.4";
+        public const string Version = "0.4.5";
 
         /// <summary>The word on the splash row and at the top of the log.</summary>
         public const string Name = "Code Three";

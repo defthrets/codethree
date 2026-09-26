@@ -349,13 +349,16 @@ namespace CodeThree.Core
         // So the driver lifts and the mate works beside him, which is what the clips allow
         // rather than what would be ideal.
         //
-        // FRONT, because the medic has been kneeling at the man's chest doing compressions and
-        // that is where he already is. The side and back variants exist for approaching a body
-        // from somewhere else, which never happens here.
+        // FROM BEHIND, NOT FROM THE FRONT. The front variant was chosen because the medic has
+        // been kneeling at the man's chest and that is where he already is -- and it lifts him
+        // face to face, which is how you help somebody up, not how you get a casualty onto a
+        // stretcher. The back variant is the real one: in behind the head, arms under the
+        // shoulders, lift. He walks round to his mark for it like any other; the mark is
+        // asked of the clip, so "behind" is wherever this clip says behind is.
 
         public const string LiftDict = "combat@drag_ped@";
-        public const string LiftMedic = "injured_pickup_front_plyr";
-        public const string LiftBody = "injured_pickup_front_ped";
+        public const string LiftMedic = "injured_pickup_back_plyr";
+        public const string LiftBody = "injured_pickup_back_ped";
 
         // ---- wheeling it -------------------------------------------------------
 
