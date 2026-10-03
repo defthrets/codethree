@@ -343,6 +343,11 @@ namespace CodeThree.UI
                   Fit, "BodyOnTrolleyYaw", -360f, 360f, 5f,
                   () => _cfg.BodyOnTrolleyYaw, v => _cfg.BodyOnTrolleyYaw = v);
 
+            Slide("Lift, medic stands back",
+                  "How far behind his mark he stands to lift. More if he is in over the patient, less if his hands fall short.",
+                  Fit, "LiftStandBack", -2f, 2f, 0.05f,
+                  () => _cfg.LiftStandBack, v => _cfg.LiftStandBack = v);
+
             Slide("Trolley from medic, sideways", "Only needed if it clips his arm on one side.",
                   Fit, "TrolleyPushX", -5f, 5f, 0.02f,
                   () => _cfg.TrolleyPushX, v => _cfg.TrolleyPushX = v);

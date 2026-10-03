@@ -210,6 +210,10 @@ namespace CodeThree.Scene
         private Walk _walk;
         private int _walkAt;
         private Vector3 _walkTo;
+        private float _walkHeading;
+
+        /// <summary>The medic's own scene for the lift, a step behind the patient's. See Lifting.</summary>
+        private Sync _medicScene;
 
         // ---- a patient being posed, and checked -------------------------------
 
@@ -463,6 +467,7 @@ namespace CodeThree.Scene
                 _liftLogged = false;
                 _loadLen = 0f;
                 _mateTo = Vector3.Zero;
+                _medicScene = null;
                 _vanAt = from;
                 _vanHeading = _van.Heading;
                 _heldAt = Game.GameTime;
@@ -951,7 +956,7 @@ namespace CodeThree.Scene
         /// blend. A mark the engine will not give is treated as already reached, which is the
         /// old behaviour -- a snap -- and no worse than it.
         /// </summary>
-        private void Approach(Ped who, Sync scene, string dict, string clip, int now)
+        private void Approach(Ped who, Sync scene, string dict, string clip, int now, float back = 0f)
         {
             _walk = Walk.Going;
             _walkAt = now;
@@ -984,7 +989,11 @@ namespace CodeThree.Scene
                 heading = Motion.HeadingOf(pelvis - at);
             }
 
+            // A STEP FURTHER BACK, IF ASKED: along the way he will face, away from the patient.
+            if (Math.Abs(back) > 0.005f) at -= Motion.Facing(heading) * back;
+
             _walkTo = at;
+            _walkHeading = heading;
 
             Crew.WalkTo(who, at, heading, 1f, MarkMs);
         }
@@ -1873,17 +1882,40 @@ namespace CodeThree.Scene
                     return;
                 }
 
-                if (_walk == Walk.None) { Approach(_driver, _scene, Anim.LiftDict, Anim.LiftMedic, now); return; }
+                if (_walk == Walk.None)
+                {
+                    Approach(_driver, _scene, Anim.LiftDict, Anim.LiftMedic, now, _cfg.LiftStandBack);
+                    return;
+                }
 
                 if (!Approached(_driver, now)) return;
 
-                if (!_scene.Cast(_driver, Anim.LiftDict, Anim.LiftMedic))
+                // HIS OWN SCENE, A STEP BEHIND THE PATIENT'S. The pair lines him up on the man
+                // by itself and, on this crew, put him in over him rather than behind him; so
+                // his half is played from a copy of the scene moved back along the way he
+                // faces, by the ini's LiftStandBack. Both scenes are set running on this same
+                // tick, from phase nought, at the one rate, and stay in step.
+                _medicScene = _scene;
+
+                var back = _cfg.LiftStandBack;
+
+                if (Math.Abs(back) > 0.005f)
+                {
+                    var shifted = _scene.Shifted(-Motion.Facing(_walkHeading) * back);
+
+                    if (shifted.Begin(false, true)) _medicScene = shifted;
+                    else Log.Warn("The medic's own lift scene would not start; he lifts from the authored spot.");
+                }
+
+                if (!_medicScene.Cast(_driver, Anim.LiftDict, Anim.LiftMedic))
                 {
                     Log.Warn("The lift would not start; he goes straight onto the canvas.");
+                    _medicScene = null;
                     To(Step.Loading, now);
                     return;
                 }
 
+                _medicScene.Rate(1f);
                 _scene.Rate(1f);
                 _sceneAt = now;
 
@@ -2012,6 +2044,8 @@ namespace CodeThree.Scene
             if (Entering())
             {
                 if (_scene != null) _scene.End();
+                if (_medicScene != null) _medicScene.End();
+                _medicScene = null;
 
                 if (_carrying)
                 {

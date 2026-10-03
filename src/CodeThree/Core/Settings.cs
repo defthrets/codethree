@@ -240,6 +240,16 @@ namespace CodeThree.Core
         public float TrolleyPushY = 1.1f;
         public float TrolleyPushZ = 0f;
 
+        /// <summary>
+        /// How far behind his authored mark the medic stands for the lift, in metres.
+        ///
+        /// The clip pair lines the rescuer up on the casualty by itself, and on this gurney
+        /// crew it put him a touch too close -- in over the man rather than behind him. His
+        /// half of the lift is played from its own scene, this much further back along the
+        /// way he faces. Positive is further from the patient.
+        /// </summary>
+        public float LiftStandBack = 0.3f;
+
         /// <summary>And the trolley in the back of the van.</summary>
         public float TrolleyInVanX = 0f;
         public float TrolleyInVanY = -1.9f;
@@ -320,6 +330,7 @@ namespace CodeThree.Core
                 s.TrolleyPushX = Nudge(ini, "Fit", "TrolleyPushX", s.TrolleyPushX);
                 s.TrolleyPushY = Nudge(ini, "Fit", "TrolleyPushY", s.TrolleyPushY);
                 s.TrolleyPushZ = Nudge(ini, "Fit", "TrolleyPushZ", s.TrolleyPushZ);
+                s.LiftStandBack = Nudge(ini, "Fit", "LiftStandBack", s.LiftStandBack);
 
                 s.TrolleyInVanX = Nudge(ini, "Fit", "TrolleyInVanX", s.TrolleyInVanX);
                 s.TrolleyInVanY = Nudge(ini, "Fit", "TrolleyInVanY", s.TrolleyInVanY);

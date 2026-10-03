@@ -343,8 +343,16 @@ namespace CodeThree.Core
         /// And the trolley goes into the van with both of them on it: the second man steps in
         /// to the side once the doors are open, both take hold and lift, and it rises and goes
         /// in through the middle of the lift rather than rolling in by itself.
+        ///
+        /// 0.4.7 -- the medic a step further back for the lift.
+        ///
+        /// The lift itself was right; he was standing in over the man rather than behind him.
+        /// His half now plays from its own copy of the scene, moved back along the way he faces
+        /// by [Fit] LiftStandBack -- thirty centimetres to start with, and on the settings
+        /// screen -- while the patient's half stays where it was. Both start on the same tick
+        /// and stay in step.
         /// </summary>
-        public const string Version = "0.4.6";
+        public const string Version = "0.4.7";
 
         /// <summary>The word on the splash row and at the top of the log.</summary>
         public const string Name = "Code Three";

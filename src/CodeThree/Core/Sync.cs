@@ -157,6 +157,16 @@ namespace CodeThree.Core
         }
 
         /// <summary>
+        /// The same scene, moved -- for a participant who is to play his half a little off
+        /// the authored spot. Started on the same tick as the original it stays in step with
+        /// it, because both run at the engine's one rate from phase nought.
+        /// </summary>
+        public Sync Shifted(Vector3 by)
+        {
+            return new Sync(_origin + by, _heading);
+        }
+
+        /// <summary>
         /// Where a participant must stand, and which way he must face, for this clip.
         ///
         /// Phase 0 is where his half starts. Phase 1 is where it ends -- which is how the trolley
