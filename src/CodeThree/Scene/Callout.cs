@@ -222,6 +222,34 @@ namespace CodeThree.Scene
         private int _posedAt;
         private bool _poseCheck;
 
+        /// <summary>Whether the pending measurement is checking a correction already applied.</summary>
+        private bool _poseVerify;
+
+        /// <summary>How many times this pose has been re-placed. Two is the most it gets.</summary>
+        private int _poseTries;
+
+        /// <summary>How a clip lies relative to its root, once that has been measured AND confirmed.</summary>
+        private struct Fit
+        {
+            public float Twist;
+            public Vector3 Local;
+            public float Z;
+        }
+
+        /// <summary>
+        /// The fits that have proved themselves this session, by clip.
+        ///
+        /// A CACHE AGAIN, BUT ONLY OF ANSWERS THAT WERE CHECKED. The last one remembered the
+        /// first measurement of each clip, and the first measurement of one clip was taken in a
+        /// scene fourteen metres from the body; every patient after it was placed fourteen
+        /// metres wrong. This one is written only when the body, re-placed by the measurement,
+        /// is then measured AGAIN and found to be lying within a few degrees and a few
+        /// centimetres of where it was meant to be. A fit that passed that check is the clip's
+        /// convention, not the scene's accident, and with it the first placement of every later
+        /// call-out is right from its first frame -- no spin, no slide, nothing to see.
+        /// </summary>
+        private static readonly Dictionary<string, Fit> _fits = new Dictionary<string, Fit>();
+
         /// <summary>
         /// For the pose he is currently in: which way it lies relative to its root, and where
         /// its pelvis sits in the root's frame.
@@ -254,10 +282,33 @@ namespace CodeThree.Scene
         private const float PelvisAboveGround = 0.12f;
 
         /// <summary>Where the trolley has got to going into the van.</summary>
-        private enum Stow { Opening, Rolling, Closing, Boarding }
+        private enum Stow { Opening, Hands, Rolling, Closing, Boarding }
 
         private Stow _stow;
         private int _stowAt;
+
+        /// <summary>The second man's spot at the side of the trolley, for lifting it in.</summary>
+        private Vector3 _mateTo;
+
+        /// <summary>How long the loading clip runs, in seconds, read off the clip itself.</summary>
+        private float _loadLen;
+
+        /// <summary>
+        /// The part of the loading clip during which the trolley actually travels: the hands
+        /// come up and push between about a third of the way through and most of the way.
+        /// </summary>
+        private const float LoadFrom = 0.30f;
+        private const float LoadTo = 0.85f;
+
+        /// <summary>How long the second man is given to get to his end of it.</summary>
+        private const int HandsMs = 4000;
+
+        /// <summary>How many times the patient has had to be put back into the CPR, and when last.</summary>
+        private int _guarded;
+        private int _guardAt;
+
+        /// <summary>Whether the half-second-in measurement of the lift has been written.</summary>
+        private bool _liftLogged;
 
         /// <summary>Whether the pushing pose has had to be re-issued with the stronger flags.</summary>
         private bool _pushHard;
@@ -401,10 +452,17 @@ namespace CodeThree.Scene
                 _vanLost = false;
                 _walk = Walk.None;
                 _poseCheck = false;
+                _poseVerify = false;
+                _poseTries = 0;
                 _groundWarned = false;
                 _pushHard = false;
                 _vanDoubted = false;
                 _recrewed = false;
+                _guarded = 0;
+                _guardAt = 0;
+                _liftLogged = false;
+                _loadLen = 0f;
+                _mateTo = Vector3.Zero;
                 _vanAt = from;
                 _vanHeading = _van.Heading;
                 _heldAt = Game.GameTime;
@@ -972,15 +1030,28 @@ namespace CodeThree.Scene
             _poseBlend = blend;
             _poseMover = mover;
 
-            // Fresh for this pose. See _twist.
+            // Fresh for this pose -- unless this clip has a fit that has already proved itself
+            // this session, in which case the first placement is the corrected one. See _fits.
             _twist = 0f;
             _local = Vector3.Zero;
             _poseZ = 0f;
 
+            Fit fit;
+            var known = _fits.TryGetValue(clip, out fit);
+
+            if (known)
+            {
+                _twist = fit.Twist;
+                _local = fit.Local;
+                _poseZ = fit.Z;
+            }
+
             PoseNow();
 
             _posedAt = now;
+            _poseTries = 0;
             _poseCheck = !float.IsNaN(lying) && pelvis != Vector3.Zero;
+            _poseVerify = known;
         }
 
         private void PoseNow()
@@ -1060,10 +1131,38 @@ namespace CodeThree.Scene
 
                 var off = turned > 12f || moved > 0.25f || Math.Abs(lift) > 0.08f;
 
-                Log.Info("Posed " + _poseClip + ": he moved " + moved.ToString("0.00") + "m, turned " +
-                         turned.ToString("0") + " degrees and sat " + (lift * 100f).ToString("0") +
-                         "cm low going into it" +
-                         (!plausible ? " -- implausible, not corrected." : off ? "; re-placed." : "."));
+                // CHECKING A CORRECTION, NOT TAKING A FIRST READING. Either the fit came off the
+                // record or he was just re-placed by a measurement; this reading says whether
+                // that left him where he was meant to be. If it did, the fit is proven and
+                // recorded for the session. If it did not, the record is wrong for this scene,
+                // it is dropped, and he is corrected again from this reading -- at most twice.
+                if (_poseVerify)
+                {
+                    _poseVerify = false;
+
+                    if (!off)
+                    {
+                        _fits[_poseClip] = new Fit { Twist = _twist, Local = _local, Z = _poseZ };
+
+                        Log.Info("Posed " + _poseClip + " on the fit: he lay within " + turned.ToString("0") +
+                                 " degrees, " + (moved * 100f).ToString("0") + "cm and " +
+                                 (Math.Abs(lift) * 100f).ToString("0") + "cm of his mark. Kept.");
+                        return;
+                    }
+
+                    _fits.Remove(_poseClip);
+
+                    Log.Warn("The fit for " + _poseClip + " left him " + turned.ToString("0") + " degrees, " +
+                             moved.ToString("0.00") + "m and " + (lift * 100f).ToString("0") +
+                             "cm off; measured again.");
+                }
+                else
+                {
+                    Log.Info("Posed " + _poseClip + ": he moved " + moved.ToString("0.00") + "m, turned " +
+                             turned.ToString("0") + " degrees and sat " + (lift * 100f).ToString("0") +
+                             "cm low going into it" +
+                             (!plausible ? " -- implausible, not corrected." : off ? "; re-placed." : "."));
+                }
 
                 if (!plausible) return;
 
@@ -1071,7 +1170,22 @@ namespace CodeThree.Scene
                 _local = local;
                 _poseZ += lift;
 
-                if (off) PoseNow();
+                if (!off)
+                {
+                    // Right first time, with nothing on record: that IS the record.
+                    _fits[_poseClip] = new Fit { Twist = _twist, Local = _local, Z = _poseZ };
+                    return;
+                }
+
+                if (_poseTries >= 2) return;
+
+                _poseTries++;
+                PoseNow();
+
+                // And measured once more, to prove it. See _fits.
+                _posedAt = now;
+                _poseCheck = true;
+                _poseVerify = true;
             }
             catch (Exception ex)
             {
@@ -1140,9 +1254,58 @@ namespace CodeThree.Scene
                 return;
             }
 
+            Guard(now);
+
             if (!BeatDone(now)) return;
 
             Advance(now);
+        }
+
+        /// <summary>
+        /// The patient put straight back if anything stands him up mid-scene.
+        ///
+        /// HE WAS GETTING UP FOR A SECOND AT A TIME, MORE THAN ONCE A SCENE, and lying back down
+        /// when the next clip took him. The scene flags and Crew.Calm are meant to stop whatever
+        /// was doing it; this is what happens if something still does. A lying man's pelvis is
+        /// a hand's width off the road. Half a metre up, he is on his feet, and he is cast back
+        /// into the clip he is supposed to be in on the same tick -- with a line in the log that
+        /// says what he was found doing, which is the next question if it keeps happening.
+        /// </summary>
+        private void Guard(int now)
+        {
+            if (_beat < 0 || _beat >= _beats.Length) return;
+            if (now - _beatAt < 300 || now - _guardAt < 400) return;
+
+            float up;
+            if (!Crew.Up(_body, out up) || up < 0.55f) return;
+
+            _guardAt = now;
+            _guarded++;
+
+            var beat = _beats[_beat];
+
+            if (_guarded <= 3)
+            {
+                Log.Warn("The patient was " + up.ToString("0.00") + "m up during " + beat.Clip +
+                         " (" + Crew.Doing(_body) + "); put back.");
+            }
+
+            try
+            {
+                if (_scene.Phase < 0f)
+                {
+                    // The scene itself has gone, so both of them go back into a fresh one.
+                    if (!_scene.Begin(beat.Loop, !beat.Loop)) return;
+
+                    _scene.Cast(_driver, Anim.CprMedic, beat.Clip);
+                }
+
+                _scene.Cast(_body, Anim.CprVictim, beat.Clip);
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not put him back: " + ex.Message);
+            }
         }
 
         /// <summary>
@@ -1188,6 +1351,7 @@ namespace CodeThree.Scene
                 Function.Call(Hash.SET_PED_FLEE_ATTRIBUTES, h, 0, false);
 
                 Crew.Hold(_body);
+                Crew.Calm(_body);
 
                 _ours = true;
 
@@ -1511,27 +1675,24 @@ namespace CodeThree.Scene
         {
             if (Entering())
             {
+                // HE STAYS AS THEY LEFT HIM. The scene is forgotten here, not stopped: the
+                // medic is given something else to do, and the patient keeps holding the last
+                // frame of the clip that failed him -- flat on his back -- for as long as it
+                // takes to fetch the trolley. He used to be put into the lift's opening pose at
+                // this moment, which sits him half up, and a man they have just given up on
+                // sitting up on his own was the most jarring thing in the scene. The lift pose
+                // is now the lift's business; see Lifting.
                 _scene.End();
+                _scene = null;
 
                 Function.Call(Hash.CLEAR_PED_TASKS, _driver.Handle);
 
                 if (_cfg.TimeOfDeath) Anim.Scenario(_mate, Anim.TimeOfDeathScenario);
                 else Unsettle(_mate);
 
-                if (Crew.Alive(_body))
-                {
-                    Vector3 pelvis;
-                    if (!Crew.Pelvis(_body, out pelvis)) pelvis = Vector3.Zero;
-
-                    Pose(Anim.LiftDict, Anim.LiftBody, Crew.Lying(_body), pelvis, 2f, Sync.Settle, now);
-                    Crew.Hold(_body);
-                }
-
                 if (Say != null && Near()) Say("They stop working on him.");
                 return;
             }
-
-            CheckPose(now);
 
             if (now - _stepAt < _cfg.PronounceMs) return;
 
@@ -1671,6 +1832,39 @@ namespace CodeThree.Scene
             if (Entering())
             {
                 _sceneAt = 0;
+                _liftLogged = false;
+
+                if (!Crew.Alive(_body))
+                {
+                    Log.Warn("He could not be posed for the lift; he goes straight onto the canvas.");
+                    To(Step.Loading, now);
+                    return;
+                }
+
+                // INTO THE LIFT'S OPENING POSE NOW, as the medic comes round behind him -- so
+                // the half-sit the clip starts from reads as the start of being lifted, not as
+                // a dead man sitting up by himself a minute before anybody touches him. The
+                // scene is anchored on his pelvis, lying the way he lies; the fit for this clip
+                // is on record after the first lift of the session, so from the second on he
+                // goes into it right first time. See Pose, and _fits.
+                Vector3 pelvis;
+                if (!Crew.Pelvis(_body, out pelvis)) pelvis = Vector3.Zero;
+
+                Pose(Anim.LiftDict, Anim.LiftBody, Crew.Lying(_body), pelvis, 2f, Sync.Settle, now);
+                Crew.Hold(_body);
+
+                Steady();
+                return;
+            }
+
+            if (_sceneAt == 0)
+            {
+                // The pose checked and, if need be, re-placed and checked again -- BEFORE the
+                // medic is sent to his mark, because the mark is asked of the scene and a scene
+                // that is about to be rebuilt has nothing to say about where to stand.
+                CheckPose(now);
+
+                if (_poseCheck) return;
 
                 if (_scene == null)
                 {
@@ -1679,13 +1873,8 @@ namespace CodeThree.Scene
                     return;
                 }
 
-                Approach(_driver, _scene, Anim.LiftDict, Anim.LiftMedic, now);
-                Steady();
-                return;
-            }
+                if (_walk == Walk.None) { Approach(_driver, _scene, Anim.LiftDict, Anim.LiftMedic, now); return; }
 
-            if (_sceneAt == 0)
-            {
                 if (!Approached(_driver, now)) return;
 
                 if (!_scene.Cast(_driver, Anim.LiftDict, Anim.LiftMedic))
@@ -1709,6 +1898,16 @@ namespace CodeThree.Scene
 
             var age = now - _sceneAt;
 
+            // AND AGAIN HALF A SECOND IN, once the mover blend has had its quarter second: where
+            // the medic actually ended up relative to his mark, and how high each of them sits
+            // over the road. A medic a metre up or a metre under is the scene's height
+            // convention being wrong for his half of the pair, and this is the line that says so.
+            if (!_liftLogged && age >= 600)
+            {
+                _liftLogged = true;
+                Settled();
+            }
+
             if (age < 300) return;
 
             var phase = _scene.Phase;
@@ -1717,6 +1916,31 @@ namespace CodeThree.Scene
             if (!done) return;
 
             To(Step.Loading, now);
+        }
+
+        private void Settled()
+        {
+            try
+            {
+                var medicOff = Crew.Alive(_driver) && _walkTo != Vector3.Zero
+                             ? Motion.FlatDistance(_driver.Position, _walkTo) : -1f;
+
+                var medicUp = Crew.Alive(_driver) ? Crew.Above(_driver) : float.NaN;
+
+                float patientUp;
+                if (!Crew.Up(_body, out patientUp)) patientUp = float.NaN;
+
+                Log.Info("The lift, half a second in: medic " +
+                         (medicOff < 0 ? "?" : (medicOff * 100f).ToString("0") + "cm") +
+                         " from his mark, his root " +
+                         (float.IsNaN(medicUp) ? "?" : (medicUp * 100f).ToString("0") + "cm") +
+                         " over the road (a standing man's is about a metre); the patient's pelvis " +
+                         (float.IsNaN(patientUp) ? "?" : (patientUp * 100f).ToString("0") + "cm") + " over it.");
+            }
+            catch
+            {
+                // Diagnostic only.
+            }
         }
 
         /// <summary>How well the lift's two halves met, in the log.</summary>
@@ -1813,11 +2037,12 @@ namespace CodeThree.Scene
                 Crew.Solid(_body, false);
                 Function.Call(Hash.FREEZE_ENTITY_POSITION, _body.Handle, true);
 
-                // He lets go, and the patient settles into lying flat over the same span he is
-                // carried across -- the morgue-table pose, with the old one behind it if the
-                // dictionary will not load.
-                Function.Call(Hash.CLEAR_PED_TASKS, _driver.Handle);
-
+                // THE MEDIC KEEPS HOLD UNTIL HE IS DOWN. He used to be cleared here, which stood
+                // him up straight the instant the lift ended while the patient was still in
+                // the air between his arms and the bed. He holds the lift's last frame for the
+                // carry -- the walk to the back of the trolley takes him out of it -- and the
+                // patient settles into lying flat over the same span he is carried across: the
+                // morgue-table pose, with the old one behind it if the dictionary will not load.
                 if (!Anim.Play(_body, Anim.DeadDict, Anim.DeadPose, Anim.Hold, -1, 1000f / CarryMs))
                 {
                     Anim.Play(_body, Anim.DeadFallbackDict, Anim.DeadFallbackPose, Anim.Hold, -1, 1000f / CarryMs);
@@ -1950,12 +2175,15 @@ namespace CodeThree.Scene
 
             Step_(_driver, _stopAt, _van.Heading, _cfg.WheelMs);
 
-            // THE SECOND MAN GOES TO THE CAB, NOT THE BACK. He was sent to a spot beside the rear
-            // corner, which is exactly the arc the right-hand door swings through, and he stood
-            // in it with the door in his face. Beside the passenger door there is nothing to
-            // stand in, and it is where he is getting in anyway.
-            var side = Crew.Offset(_van, 1.9f, 1.2f, 0f);
-            Step_(_mate, side, _van.Heading + 90f, _cfg.WheelMs);
+            // THE SECOND MAN WAITS WIDE OF THE BACK, NOT IN IT. He was once sent to a spot beside
+            // the rear corner, which is exactly the arc the right-hand door swings through, and
+            // he stood in it with the door in his face; then to the cab, which left him a van's
+            // length from the trolley when it was time to lift it in. Now he waits a long step
+            // out from the side and two metres back from the bumper -- outside any door's
+            // swing, whatever angle this model opens to -- facing where the trolley will stop,
+            // and steps in to it once the doors are open. See Stowing.
+            var side = Crew.Offset(_van, 1.6f, _vanRear - 2.2f, 0f);
+            Step_(_mate, side, Motion.HeadingOf(Motion.Flat(_stopAt - side)), _cfg.WheelMs);
         }
 
         private void Wheeling(int now)
@@ -2024,6 +2252,9 @@ namespace CodeThree.Scene
 
                 Doors(true);
 
+                // And the second man in to his end of it while they swing.
+                Hands_();
+
                 _stow = Stow.Opening;
                 _stowAt = now;
                 return;
@@ -2043,20 +2274,43 @@ namespace CodeThree.Scene
                         return;
                     }
 
+                    _stow = Stow.Hands;
+                    _stowAt = now;
+                    return;
+
+                case Stow.Hands:
+                {
+                    // BOTH OF THEM ON IT BEFORE IT MOVES. The driver has been at the back of it
+                    // since he pushed it here; the second man is given a few seconds to reach
+                    // the side. Then both take hold and lift, and the roll is timed to the lift.
+                    var there = !Crew.Alive(_mate) || _mateTo == Vector3.Zero ||
+                                Motion.FlatDistance(_mate.Position, _mateTo) < 0.6f;
+
+                    if (!there && now - _stowAt < HandsMs) return;
+
+                    Lift_();
+
                     _trolley.RollFrom();
                     _stow = Stow.Rolling;
                     _stowAt = now;
                     return;
+                }
 
                 case Stow.Rolling:
                 {
-                    var t = (now - _stowAt) / (float)RollMs;
+                    // IT GOES IN ON THE CLIP'S OWN TIMING. The loading clip has the hands come up
+                    // and push through its middle, and the trolley travels through exactly that
+                    // span of it -- so it rises and goes in as they lift and shove, not before
+                    // they have bent to it and not after they have let go.
+                    var t = RollPhase(now);
 
                     if (t < 1f)
                     {
-                        _trolley.Roll(_van, Motion.Smooth(t));
+                        if (t > 0f) _trolley.Roll(_van, Motion.Smooth(t));
                         return;
                     }
+
+                    _trolley.Roll(_van, 1f);
 
                     if (!_trolley.Stow(_van)) InVan();
 
@@ -2109,6 +2363,75 @@ namespace CodeThree.Scene
                     return;
                 }
             }
+        }
+
+        /// <summary>
+        /// The second man to the side of the trolley, facing it, to take the other end.
+        ///
+        /// Beside its back half, on the van's right -- which is his side, he waited there --
+        /// and well behind the bumper, so the open door is not where he is standing. The spot
+        /// is taken off the trolley itself, not the van, because the trolley is where it was
+        /// actually pushed to and the van is only where it was meant to be.
+        /// </summary>
+        private void Hands_()
+        {
+            _mateTo = Vector3.Zero;
+
+            if (!Crew.Alive(_mate) || !_trolley.There) return;
+
+            try
+            {
+                var along = _trolley.Along;
+                if (along.Length() < 0.5f) return;
+
+                var right = new Vector3(along.Y, -along.X, 0f);
+
+                _mateTo = _trolley.Where - along * 0.35f + right * 0.85f;
+
+                Step_(_mate, _mateTo, Motion.HeadingOf(-right), HandsMs);
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("The second man could not be sent to the trolley: " + ex.Message);
+            }
+        }
+
+        /// <summary>Both men into the loading clip, held at its end, and the clip's length read for the roll.</summary>
+        private void Lift_()
+        {
+            _loadLen = Anim.Duration(Anim.LoadDict, Anim.LoadClip);
+
+            var a = Anim.Play(_driver, Anim.LoadDict, Anim.LoadClip, Anim.Hold, -1, 4f);
+            var b = !Crew.Alive(_mate) || Anim.Play(_mate, Anim.LoadDict, Anim.LoadClip, Anim.Hold, -1, 4f);
+
+            if (!a || !b)
+            {
+                Log.Warn("The loading clip would not play on " + (!a && !b ? "either of them" : !a ? "the driver" : "the second man") +
+                         "; the trolley goes in regardless.");
+            }
+
+            Log.Debug("Loading it: the clip runs " + _loadLen.ToString("0.0") + "s; the second man is " +
+                      (Crew.Alive(_mate) && _mateTo != Vector3.Zero
+                           ? Motion.FlatDistance(_mate.Position, _mateTo).ToString("0.00") + "m from his end."
+                           : "not at it."));
+        }
+
+        /// <summary>
+        /// How far through its travel the trolley should be: nought before the hands come up,
+        /// one once they have pushed. Past the clip's end plus a beat, one regardless, because
+        /// a clip that did not play still has a trolley to get in.
+        /// </summary>
+        private float RollPhase(int now)
+        {
+            var age = (now - _stowAt) / 1000f;
+            var len = _loadLen > 0.5f ? _loadLen : RollMs / 1000f;
+
+            if (age >= len + 0.5f) return 1f;
+
+            var from = len * LoadFrom;
+            var to = len * LoadTo;
+
+            return (age - from) / Math.Max(0.2f, to - from);
         }
 
         /// <summary>

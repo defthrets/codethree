@@ -323,8 +323,28 @@ namespace CodeThree.Core
         /// is how a casualty goes onto a stretcher, rather than face to face, which is how a
         /// friend is helped up. And a lying pelvis is held twenty centimetres above the canvas
         /// rather than twelve, because this gurney has a mattress and at twelve he lay in it.
+        ///
+        /// 0.4.6 -- he stays down, he is lifted from where he lies, and two men load him.
+        ///
+        /// The patient kept standing up for a second in the middle of the CPR and lying back
+        /// down on the next clip: the scene task could be interrupted by the game's temporary
+        /// events -- traffic about to hit a man in the road, the player bumping him -- and
+        /// was. Every scene is now cast uninterruptable and kinematic, the patient is given no
+        /// reflexes to interrupt it with, and a guard puts him straight back if anything
+        /// still gets him up, with a line in the log saying what he was found doing.
+        ///
+        /// He no longer sits half up the moment he is pronounced. He lies as they left him
+        /// while the trolley is fetched, and goes into the lift's opening pose only as the
+        /// medic comes round behind him. The way each clip lies is measured, confirmed by a
+        /// second measurement, and only then kept for the session -- so from the second lift
+        /// on he goes into it right from the first frame. The medic keeps hold of him until he
+        /// is on the canvas instead of standing up straight the instant the lift ends.
+        ///
+        /// And the trolley goes into the van with both of them on it: the second man steps in
+        /// to the side once the doors are open, both take hold and lift, and it rises and goes
+        /// in through the middle of the lift rather than rolling in by itself.
         /// </summary>
-        public const string Version = "0.4.5";
+        public const string Version = "0.4.6";
 
         /// <summary>The word on the splash row and at the top of the log.</summary>
         public const string Name = "Code Three";

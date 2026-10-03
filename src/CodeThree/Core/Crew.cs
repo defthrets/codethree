@@ -287,6 +287,74 @@ namespace CodeThree.Core
             return fallback;
         }
 
+        /// <summary>
+        /// Nothing in the world gets a reaction out of him.
+        ///
+        /// Blocking non-temporary events is not the whole of it. The evasive dive out of a
+        /// car's path is its own switch, so is being knocked about by the player, and a man who
+        /// can neither see nor hear generates no events to be interrupted by in the first
+        /// place. Set on the patient the moment he is brought into arrest, alongside the scene
+        /// flags that make his task uninterruptable -- see Sync.
+        /// </summary>
+        public static void Calm(Ped who)
+        {
+            try
+            {
+                if (!There(who)) return;
+
+                var h = who.Handle;
+
+                Function.Call(Hash.SET_PED_CAN_EVASIVE_DIVE, h, false);
+                Function.Call(Hash.SET_PED_CAN_RAGDOLL_FROM_PLAYER_IMPACT, h, false);
+                Function.Call(Hash.SET_PED_SEEING_RANGE, h, 0f);
+                Function.Call(Hash.SET_PED_HEARING_RANGE, h, 0f);
+            }
+            catch
+            {
+                // He keeps his reflexes, and the guard in the scene puts him back if he uses them.
+            }
+        }
+
+        /// <summary>
+        /// What he is doing, in a few words, for a log line about a man who should be lying still.
+        /// </summary>
+        public static string Doing(Ped who)
+        {
+            try
+            {
+                if (!There(who)) return "gone";
+
+                var h = who.Handle;
+
+                if (Function.Call<bool>(Hash.IS_PED_RAGDOLL, h)) return "ragdolling";
+                if (Function.Call<bool>(Hash.IS_PED_FLEEING, h)) return "fleeing";
+                if (Function.Call<bool>(Hash.IS_PED_USING_ANY_SCENARIO, h)) return "in a scenario";
+                if (Function.Call<bool>(Hash.IS_PED_RUNNING, h)) return "running";
+                if (Function.Call<bool>(Hash.IS_PED_WALKING, h)) return "walking";
+
+                // 135 is CTaskSynchronizedScene in the task type table.
+                if (Function.Call<bool>(Hash.GET_IS_TASK_ACTIVE, h, 135)) return "still in a scene";
+
+                return "standing, " + (int)who.Health + " health";
+            }
+            catch
+            {
+                return "unknown";
+            }
+        }
+
+        /// <summary>How far his pelvis is above the ground under it. A lying man's is a hand's width.</summary>
+        public static bool Up(Ped who, out float up)
+        {
+            up = 0f;
+
+            Vector3 pelvis;
+            if (!Pelvis(who, out pelvis)) return false;
+
+            up = pelvis.Z - Ground(pelvis, pelvis.Z);
+            return true;
+        }
+
         /// <summary>SKEL_Head and SKEL_Pelvis, by bone id.</summary>
         private const int HeadBone = 31086;
         private const int PelvisBone = 11816;

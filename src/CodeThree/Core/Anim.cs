@@ -133,8 +133,25 @@ namespace CodeThree.Core
         public static readonly string[] Scene =
         {
             CprMedic, CprVictim, Rescue, GetUpDict, DeadDict, DeadFallbackDict, LiftDict, PushDict,
-            FleeDict, LookDict,
+            FleeDict, LookDict, LoadDict,
         };
+
+        /// <summary>How long a clip runs, in seconds; nought when the engine will not say.</summary>
+        public static float Duration(string dict, string clip)
+        {
+            try
+            {
+                if (!Ready(dict)) return 0f;
+
+                var s = Function.Call<float>(Hash.GET_ANIM_DURATION, dict, clip);
+
+                return s > 0f && s < 60f ? s : 0f;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
 
         /// <summary>Whether this ped is already running this exact clip. Slot 3 covers both.</summary>
         public static bool IsPlaying(Ped who, string dict, string clip)
@@ -396,6 +413,20 @@ namespace CodeThree.Core
         /// movement task to leave it alone.
         /// </summary>
         public const int PushHard = 57;
+
+        // ---- lifting it into the van -------------------------------------------
+        //
+        // anim@heists@load_box IS THE HEIST PREP CREW LOADING CRATES INTO A VAN: a man with
+        // both hands on something at chest height, lifting it and shoving it in, which with a
+        // gurney in front of him is a paramedic loading a gurney. The four load_box variants
+        // and lift_box are all in the dump; the first load is the one used, on both men, and
+        // the trolley goes in on the clip's own timing -- see Callout.Stowing.
+        //
+        // THERE IS STILL NO TWO-MAN ANYTHING IN THIS GAME. Two men each playing the same lift
+        // from the two ends of the same trolley is as close as the clips come.
+
+        public const string LoadDict = "anim@heists@load_box";
+        public const string LoadClip = "load_box_1";
 
         // ---- how he walks away -------------------------------------------------
 

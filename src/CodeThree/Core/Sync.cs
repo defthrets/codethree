@@ -44,6 +44,20 @@ namespace CodeThree.Core
         private const int RotationOrder = 2;
 
         /// <summary>
+        /// SYNCED_SCENE_USE_KINEMATIC_PHYSICS (1) and SYNCED_SCENE_DONT_INTERRUPT (4).
+        ///
+        /// THE PATIENT KEPT STANDING UP IN THE MIDDLE OF THE CPR, for about a second, and lying
+        /// back down when the next clip took him. Blocking non-temporary events stops a man
+        /// reacting to what he sees; it does not stop the TEMPORARY ones -- a car about to run
+        /// him over, the player walking into him -- and a scene task started with no flags is
+        /// interruptable by exactly those. He was lying in the road; traffic went past; the
+        /// engine had him get up out of its way, and the next beat put him back. DONT_INTERRUPT
+        /// is the flag Rockstar's own scenes set so that nothing short of a script moves a
+        /// participant, and kinematic physics is what keeps a passing bumper from shoving him.
+        /// </summary>
+        private const int SceneFlags = 5;
+
+        /// <summary>
         /// The mover blend for a man joining a scene he has walked to.
         ///
         /// NOT INSTANT ANY MORE. 1000 is a single-frame snap and was the default, which is fine
@@ -230,7 +244,7 @@ namespace CodeThree.Core
             try
             {
                 Function.Call(Hash.TASK_SYNCHRONIZED_SCENE, who.Handle, _scene, dict, clip,
-                              blendIn, -8f, 0, 0, mover, 0);
+                              blendIn, -8f, SceneFlags, 0, mover, 0);
 
                 return true;
             }
