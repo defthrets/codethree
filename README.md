@@ -1,3 +1,7 @@
+﻿> **Retired on 2026-10-04.** This mod was merged into [911 Response](https://github.com/defthrets/911-response)
+> together with Five0 Patrol and Firefighter Tweaks: one dll, one ini, one menu. This repository is kept as
+> history and is not developed further; the code here is the last state before the merge.
+
 # Code Three
 
 Paramedics who actually do something, for GTA V.
