@@ -167,6 +167,19 @@ namespace CodeThree.Core
         }
 
         /// <summary>
+        /// The same scene with its origin at a given height.
+        ///
+        /// A chained clip is anchored where the last one left the ped, and Anchored takes the
+        /// origin's height from him -- but the height convention belongs to the dictionary,
+        /// not to where he happens to be, so a chain keeps the height the first scene was
+        /// measured at and only the position moves.
+        /// </summary>
+        public Sync AtHeight(float z)
+        {
+            return new Sync(new Vector3(_origin.X, _origin.Y, z), _heading);
+        }
+
+        /// <summary>
         /// Where a participant must stand, and which way he must face, for this clip.
         ///
         /// Phase 0 is where his half starts. Phase 1 is where it ends -- which is how the trolley

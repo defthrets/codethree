@@ -123,10 +123,36 @@ namespace CodeThree.Scene
 
         private bool _measured;
 
-        // ---- the roll into the van ---------------------------------------------
+        // ---- the roll into the van, and out of it ------------------------------
 
         private Vector3 _rollFrom;
         private float _rollFromHeading;
+        private Vector3 _rollTo;
+        private float _rollToHeading;
+
+        // ---- standing and collapsed ---------------------------------------------
+
+        /// <summary>The origin's height standing on its wheels where it is parked, and dropped to the road.</summary>
+        private float _highZ;
+        private float _lowZ;
+
+        /// <summary>Nought standing, one dropped to the road. See Lower.</summary>
+        private float _dropped;
+
+        /// <summary>
+        /// The canvas top this far UNDER the road when it is dropped, so a man put down on the
+        /// road by a clip that lays him on the road is lying on the canvas, not in it.
+        /// </summary>
+        private const float DroppedBelowRoad = 0.08f;
+
+        // ---- a body attached where it already lies -------------------------------
+
+        /// <summary>
+        /// The attach offsets that keep him exactly where the put-down left him, in the
+        /// trolley's own frame -- and whether they, rather than the ini's numbers, are in use.
+        /// </summary>
+        private bool _keep;
+        private float _keepX, _keepY, _keepZ, _keepYaw;
 
         public Gurney(Settings cfg)
         {
@@ -202,10 +228,72 @@ namespace CodeThree.Scene
         {
             if (There) return true;
 
+            if (!Create(at, alongHeading)) return false;
+
+            try
+            {
+                // THE ROAD'S HEIGHT, CHECKED AGAINST THE PATIENT'S. The probe is usually
+                // right, and when it is wrong it is wrong by a storey -- a spot inside a
+                // wall, a probe that found a roof -- and that is the trolley in the sky. A
+                // man lying beside it is at road height by definition, so anything more
+                // than a metre and a half from him is not the road, and his height is used.
+                // PROBED FROM THE PATIENT'S HEIGHT, NOT THE SPOT'S. The spot's Z comes from
+                // the lift clip's end mark, which carries the clip's metre-high root, so a
+                // probe started from there began under a canopy or a first-floor slab and
+                // found that instead of the road -- 1.9m out, every time, and the warning
+                // below firing on every call-out for a trolley that ended up fine anyway.
+                var ground = Crew.Ground(new Vector3(at.X, at.Y, nearZ), nearZ);
+
+                if (Math.Abs(ground - nearZ) > 1.5f)
+                {
+                    Log.Warn("The ground probe put the trolley " + (ground - nearZ).ToString("0.0") +
+                             "m from the patient's height; using his instead.");
+                    ground = nearZ;
+                }
+
+                Function.Call(Hash.SET_ENTITY_COORDS_NO_OFFSET, _trolley.Handle,
+                              at.X, at.Y, ground + _standZ, false, false, false);
+
+                Function.Call(Hash.FREEZE_ENTITY_POSITION, _trolley.Handle, true);
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not stand the trolley up: " + ex.Message);
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Creates it in the back of the van, riding there, as if it had been all along.
+        ///
+        /// NOT BESIDE THE PATIENT. For three versions the trolley appeared on the road next to
+        /// him, out of nothing, and "the stretcher is spawned" was in every report. It comes
+        /// out of the ambulance now: this puts it in the back, and RollOutFrom brings it out
+        /// through the doors as the second man pulls on it.
+        /// </summary>
+        public bool Appear(Vehicle van)
+        {
+            if (There) return true;
+            if (!Crew.Alive(van)) return false;
+
+            var at = Crew.Offset(van, _cfg.TrolleyInVanX, _cfg.TrolleyInVanY, _cfg.TrolleyInVanZ);
+            if (at == Vector3.Zero) return false;
+
+            if (!Create(at, van.Heading)) return false;
+
+            return Stow(van);
+        }
+
+        /// <summary>The prop itself, held, measured and pointed; where it goes is the caller's.</summary>
+        private bool Create(Vector3 at, float alongHeading)
+        {
             // A correction is only as good as the trolley it was measured on. See _yawFix.
             _yawFix = 0f;
             _zFix = 0f;
             _squared = false;
+            _keep = false;
+            _dropped = 0f;
 
             foreach (var name in Props)
             {
@@ -227,30 +315,6 @@ namespace CodeThree.Scene
                     Shape(name);
 
                     _trolley.Heading = alongHeading + _axisYaw;
-
-                    // THE ROAD'S HEIGHT, CHECKED AGAINST THE PATIENT'S. The probe is usually
-                    // right, and when it is wrong it is wrong by a storey -- a spot inside a
-                    // wall, a probe that found a roof -- and that is the trolley in the sky. A
-                    // man lying beside it is at road height by definition, so anything more
-                    // than a metre and a half from him is not the road, and his height is used.
-                    // PROBED FROM THE PATIENT'S HEIGHT, NOT THE SPOT'S. The spot's Z comes from
-                    // the lift clip's end mark, which carries the clip's metre-high root, so a
-                    // probe started from there began under a canopy or a first-floor slab and
-                    // found that instead of the road -- 1.9m out, every time, and the warning
-                    // below firing on every call-out for a trolley that ended up fine anyway.
-                    var ground = Crew.Ground(new Vector3(at.X, at.Y, nearZ), nearZ);
-
-                    if (Math.Abs(ground - nearZ) > 1.5f)
-                    {
-                        Log.Warn("The ground probe put the trolley " + (ground - nearZ).ToString("0.0") +
-                                 "m from the patient's height; using his instead.");
-                        ground = nearZ;
-                    }
-
-                    Function.Call(Hash.SET_ENTITY_COORDS_NO_OFFSET, _trolley.Handle,
-                                  at.X, at.Y, ground + _standZ, false, false, false);
-
-                    Function.Call(Hash.FREEZE_ENTITY_POSITION, _trolley.Handle, true);
 
                     Log.Info("The crew brought a trolley out (" + name + ").");
                     return true;
@@ -343,6 +407,7 @@ namespace CodeThree.Scene
             try
             {
                 _load = body;
+                _keep = false;
 
                 OnCanvas();
                 return true;
@@ -354,9 +419,204 @@ namespace CodeThree.Scene
             }
         }
 
+        /// <summary>
+        /// Attached to it exactly where he is lying -- nothing moves.
+        ///
+        /// THE OTHER WAY ROUND FROM LAY. Lay puts him where the ini says a body goes on the
+        /// canvas, and he has to be carried there first. This one is for a man who has already
+        /// been dragged onto the dropped trolley and put down on it by the clips: the trolley
+        /// is first set at the height that puts the canvas the tuned distance under his pelvis,
+        /// then the attach offsets are read off where he actually is, so the attach changes
+        /// nothing you can see. It only stops him being left behind when the trolley rises.
+        /// </summary>
+        public bool Settle(Ped body)
+        {
+            if (!There || !Crew.There(body)) return false;
+
+            try
+            {
+                _load = body;
+
+                Vector3 pelvis;
+                if (Crew.Pelvis(body, out pelvis))
+                {
+                    var where = _trolley.Position;
+                    var z = pelvis.Z - PelvisAboveBed - _bedZ - _cfg.BodyOnTrolleyZ;
+
+                    Function.Call(Hash.SET_ENTITY_COORDS_NO_OFFSET, _trolley.Handle,
+                                  where.X, where.Y, z, false, false, false);
+
+                    _lowZ = z;
+                }
+
+                var delta = body.Position - _trolley.Position;
+                var local = Motion.Rotate(Motion.Flat(delta), -_trolley.Heading);
+
+                _keep = true;
+                _keepX = local.X;
+                _keepY = local.Y;
+                _keepZ = delta.Z;
+                _keepYaw = Motion.Wrap(body.Heading - _trolley.Heading);
+
+                Kept();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not settle him on the trolley: " + ex.Message);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// A tick after Settle: whatever the attach moved him by, taken back out of the offsets.
+        ///
+        /// An offset given to a ped attach is not quite where the ped's root ends up -- the
+        /// engine has its own ideas about a capsule -- so the first attach can shift him a few
+        /// centimetres. Measured off his pelvis and removed, once.
+        /// </summary>
+        public void Resettle(Vector3 pelvisBefore, float headingBefore)
+        {
+            if (!There || !_keep || !Crew.There(_load)) return;
+
+            try
+            {
+                Vector3 pelvisNow;
+                if (!Crew.Pelvis(_load, out pelvisNow)) return;
+
+                var moved = pelvisNow - pelvisBefore;
+                var turned = Motion.Wrap(_load.Heading - headingBefore);
+
+                if (moved.Length() < 0.02f && Math.Abs(turned) < 2f)
+                {
+                    Log.Info("On the canvas where he was put down; the attach moved him by nothing.");
+                    return;
+                }
+
+                if (moved.Length() > 1.5f)
+                {
+                    Log.Warn("The attach moved him " + moved.Length().ToString("0.00") + "m, which is not a capsule offset. Left as set.");
+                    return;
+                }
+
+                var local = Motion.Rotate(Motion.Flat(moved), -_trolley.Heading);
+
+                _keepX -= local.X;
+                _keepY -= local.Y;
+                _keepZ -= moved.Z;
+                _keepYaw = Motion.Wrap(_keepYaw - turned);
+
+                Kept();
+
+                Log.Info("On the canvas where he was put down; the attach had moved him " +
+                         (moved.Length() * 100f).ToString("0") + "cm and " + turned.ToString("0") +
+                         " degrees, taken back out.");
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not re-settle him: " + ex.Message);
+            }
+        }
+
+        private void Kept()
+        {
+            if (!There || !Crew.There(_load)) return;
+
+            Function.Call(Hash.ATTACH_ENTITY_TO_ENTITY,
+                          _load.Handle, _trolley.Handle, 0,
+                          _keepX, _keepY, _keepZ,
+                          0f, 0f, _keepYaw,
+                          false, false, false, true, 2, true, 0);
+        }
+
+        /// <summary>Whether a point is over the canvas, give or take a hand's width.</summary>
+        public bool Over(Vector3 at)
+        {
+            if (!There) return false;
+
+            var d = Motion.Flat(at - _trolley.Position);
+            var along = Along;
+            var right = new Vector3(along.Y, -along.X, 0f);
+
+            return Math.Abs(Vector3.Dot(d, along)) <= _halfLength + 0.25f &&
+                   Math.Abs(Vector3.Dot(d, right)) <= 0.55f;
+        }
+
+        /// <summary>
+        /// Let go of where it stands: frozen, nobody's, and from here able to be dropped.
+        ///
+        /// Solid or not is the caller's: a trolley standing beside him for a carry is a thing
+        /// people walk round; one about to be dropped to the road for a drag is a thing they
+        /// have to be able to walk over.
+        /// </summary>
+        public void Park(bool solid)
+        {
+            if (!There) return;
+
+            try
+            {
+                _pushing = null;
+                _holder = Held.Loose;
+
+                Function.Call(Hash.FREEZE_ENTITY_POSITION, _trolley.Handle, true);
+                Crew.Solid(_trolley, solid);
+
+                var at = _trolley.Position;
+
+                _highZ = at.Z;
+                _lowZ = Crew.Ground(at, at.Z - _standZ) - DroppedBelowRoad - _bedZ;
+                _dropped = 0f;
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not park the trolley: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Dropped to the road, part of the way: nought standing on its wheels, one with the
+        /// canvas at road level and the undercarriage under it -- which is what a crew does
+        /// with the release lever, and what lets a man be dragged onto it.
+        /// </summary>
+        public void Lower(float t)
+        {
+            if (!There) return;
+
+            try
+            {
+                t = t < 0f ? 0f : t > 1f ? 1f : t;
+
+                var at = _trolley.Position;
+
+                Function.Call(Hash.SET_ENTITY_COORDS_NO_OFFSET, _trolley.Handle,
+                              at.X, at.Y, _highZ + (_lowZ - _highZ) * t, false, false, false);
+
+                _dropped = t;
+            }
+            catch
+            {
+                // It stays at the height it was.
+            }
+        }
+
+        /// <summary>Back up onto its wheels, part of the way, with whatever is attached coming with it.</summary>
+        public void Raise(float t)
+        {
+            Lower(1f - t);
+        }
+
+        /// <summary>Whether it is down on the road rather than up on its wheels.</summary>
+        public bool Dropped
+        {
+            get { return There && _dropped > 0.5f; }
+        }
+
         private void OnCanvas()
         {
             if (!There || !Crew.There(_load)) return;
+
+            // A MAN SETTLED WHERE HE LAY KEEPS HIS OWN OFFSETS, not the ini's. See Settle.
+            if (_keep) { Kept(); return; }
 
             // isPed IS TRUE, AND THAT IS THE WHOLE OF WHY HE WAS UNDER THE BED. The thirteenth
             // argument says whether the thing being attached is a ped, and it was passed as
@@ -517,6 +777,59 @@ namespace CodeThree.Scene
             Crew.Solid(_trolley, false);
         }
 
+        /// <summary>
+        /// Starts it coming OUT of the back: off the van, frozen, to be eased from where it
+        /// rides to a spot on the road behind the bumper -- the spot the man pulling it will
+        /// then find it in front of him, so taking hold of it moves it by nothing.
+        /// </summary>
+        public void RollOutFrom(Vector3 to, float toHeading)
+        {
+            if (!There) return;
+
+            try
+            {
+                Function.Call(Hash.DETACH_ENTITY, _trolley.Handle, true, true);
+                Function.Call(Hash.FREEZE_ENTITY_POSITION, _trolley.Handle, true);
+                Crew.Solid(_trolley, false);
+
+                _aboard = null;
+                _pushing = null;
+                _holder = Held.Rolling;
+
+                _rollFrom = _trolley.Position;
+                _rollFromHeading = _trolley.Heading;
+
+                var ground = Crew.Ground(to, to.Z);
+
+                _rollTo = new Vector3(to.X, to.Y, ground + _standZ + _cfg.TrolleyPushZ);
+                _rollToHeading = toHeading + _axisYaw;
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not start the trolley out of the van: " + ex.Message);
+            }
+        }
+
+        /// <summary>Part of the way out, 0 to 1. Eased by the caller.</summary>
+        public void RollOut(float t)
+        {
+            if (!There) return;
+
+            try
+            {
+                var at = Motion.Lerp(_rollFrom, _rollTo, t);
+
+                Function.Call(Hash.SET_ENTITY_COORDS_NO_OFFSET, _trolley.Handle,
+                              at.X, at.Y, at.Z, false, false, false);
+
+                _trolley.Heading = Motion.Turn(_rollFromHeading, _rollToHeading, t);
+            }
+            catch
+            {
+                // Take puts it in front of him regardless.
+            }
+        }
+
         /// <summary>Part of the way in, 0 to 1. Eased by the caller.</summary>
         public void Roll(Vehicle van, float t)
         {
@@ -643,6 +956,8 @@ namespace CodeThree.Scene
             _yawFix = 0f;
             _zFix = 0f;
             _squared = false;
+            _keep = false;
+            _dropped = 0f;
         }
     }
 }

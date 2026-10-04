@@ -351,8 +351,25 @@ namespace CodeThree.Core
         /// by [Fit] LiftStandBack -- thirty centimetres to start with, and on the settings
         /// screen -- while the patient's half stays where it was. Both start on the same tick
         /// and stay in step.
+        ///
+        /// 0.5.0 -- nothing teleports, and two men put him on the trolley.
+        ///
+        /// The trolley no longer appears beside him. The second man walks back to the van,
+        /// the doors open, it is created in the back where it rides, he pulls it out on the
+        /// crate-loading clip, wheels it over the way the driver wheels it back, and bends to
+        /// the release: it drops to the road beyond the patient's head, undercarriage under
+        /// the tarmac, canvas at road height.
+        ///
+        /// And he is not carried through the air onto it. The pickup from behind stands as it
+        /// was; it chains into the game's own drag, the medic backing up with him along his
+        /// own line until his pelvis is over the canvas, and into the put-down, which lays him
+        /// on it -- every centimetre by a paired clip. He is attached where he lies, the
+        /// second man takes the foot end, and both lift it off the road in the floor lift
+        /// with the trolley rising through the middle of the clip. Where the lane beyond his
+        /// head is blocked -- a wall, a car, a drop -- it falls back to the standing trolley
+        /// beside him and the old carry, and says so.
         /// </summary>
-        public const string Version = "0.4.7";
+        public const string Version = "0.5.0";
 
         /// <summary>The word on the splash row and at the top of the log.</summary>
         public const string Name = "Code Three";

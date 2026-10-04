@@ -13,9 +13,12 @@ things happens, decided by what actually killed him:
 - **A beating, a bat, a knife, a taser.** They get him back. He comes round sat on the road,
   the medic hauls him to his feet, and he limps off with a third of his health.
 - **A gun, a car, a fire, an explosion, a long drop.** They stop. The second man stands over him
-  and writes down the time. Then they fetch the trolley, lift him onto it from behind, wheel
-  him to the van, open the doors, lift it into the back between them, shut the doors and drive
-  him to the nearest hospital.
+  and writes down the time. Then the second man walks back to the van, pulls the trolley out
+  of the back, wheels it over and drops it to the road beyond the patient's head; the medic
+  lifts him from behind, backs up with him onto the canvas and lays him down on it; both men
+  raise the trolley; it is wheeled to the van, lifted into the back between them, the doors
+  are shut and he is driven to the nearest hospital. Nothing appears out of nothing and
+  nobody is slid through the air: every move he makes is one of the game's own paired clips.
 
 Pure ScriptHookVDotNet: one dll, one ini, two PNGs. **No game file is modified**, no RPF edits,
 no asset replacement, no dependencies beyond ScriptHookVDotNet itself. One build runs on both

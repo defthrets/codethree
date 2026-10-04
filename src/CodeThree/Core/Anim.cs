@@ -133,7 +133,7 @@ namespace CodeThree.Core
         public static readonly string[] Scene =
         {
             CprMedic, CprVictim, Rescue, GetUpDict, DeadDict, DeadFallbackDict, LiftDict, PushDict,
-            FleeDict, LookDict, LoadDict,
+            FleeDict, LookDict, LoadDict, LowerDict,
         };
 
         /// <summary>How long a clip runs, in seconds; nought when the engine will not say.</summary>
@@ -376,6 +376,32 @@ namespace CodeThree.Core
         public const string LiftDict = "combat@drag_ped@";
         public const string LiftMedic = "injured_pickup_back_plyr";
         public const string LiftBody = "injured_pickup_back_ped";
+
+        // AND THE REST OF THAT SET, WHICH IS HOW HE GETS ONTO THE TROLLEY WITHOUT A TELEPORT.
+        // The pickup ends with the casualty held up under the arms; the drag is the rescuer
+        // backing up with him, heels on the ground; the put-down lays him back on the road.
+        // Chained, with the trolley dropped to road height beyond his head, the drag takes him
+        // onto the canvas and the put-down lays him on it -- every centimetre of the way
+        // driven by a paired clip rather than by a script sliding a body through the air.
+
+        public const string DragMedic = "injured_drag_plyr";
+        public const string DragBody = "injured_drag_ped";
+        public const string PutdownMedic = "injured_putdown_plyr";
+        public const string PutdownBody = "injured_putdown_ped";
+
+        /// <summary>
+        /// The trolley raised from the road with both men on it: a lift from the floor up to
+        /// the chest, in the same crate-loading set as the van load, with the trolley rising
+        /// through the middle of it.
+        /// </summary>
+        public const string RaiseClip = "lift_box";
+
+        /// <summary>
+        /// Dropping it: the ordinary put-something-down-low bend, played at the foot end as the
+        /// undercarriage goes. pickup_object is the dictionary the player's own pickups use.
+        /// </summary>
+        public const string LowerDict = "pickup_object";
+        public const string LowerClip = "putdown_low";
 
         // ---- wheeling it -------------------------------------------------------
 

@@ -314,6 +314,93 @@ namespace CodeThree.Scene
         /// <summary>Whether the half-second-in measurement of the lift has been written.</summary>
         private bool _liftLogged;
 
+        // ---- fetching the trolley from the van -----------------------------------
+
+        /// <summary>Where the second man has got to bringing the trolley from the van.</summary>
+        private enum Fetch { Going, Opening, Unloading, Bringing, Lowering, Pause }
+
+        private Fetch _fetch;
+        private int _fetchAt;
+
+        /// <summary>Whoever goes for the trolley: the second man, or the driver if there is no second man.</summary>
+        private Ped _fetcher;
+
+        /// <summary>Where he stands at the back of the van to pull it out.</summary>
+        private Vector3 _vanSpot;
+
+        /// <summary>Where the fetcher was last seen making progress, and when.</summary>
+        private Vector3 _fetchLast;
+        private int _fetchLastAt;
+
+        /// <summary>Whether the back doors have been asked open for the fetch.</summary>
+        private bool _doorsOpened;
+
+        /// <summary>Where the trolley is parked by the patient: its centre, and the way its long axis points.</summary>
+        private Vector3 _park;
+        private float _parkHeading;
+
+        /// <summary>Where the man wheeling it stands to leave it there.</summary>
+        private Vector3 _parkStop;
+
+        /// <summary>
+        /// The patient's own line, feet to head, flat. The drag goes along it.
+        /// </summary>
+        private Vector3 _lane;
+
+        /// <summary>
+        /// Whether he goes onto a trolley dropped to the road beyond his head, dragged and put
+        /// down by the paired clips -- or, when the lane beyond his head is blocked, onto a
+        /// standing trolley beside him by the old carry.
+        /// </summary>
+        private bool _dragLane;
+
+        /// <summary>How far beyond his pelvis the dropped trolley's centre is put, in metres.</summary>
+        private const float DragReach = 2.4f;
+
+        /// <summary>How far beyond his pelvis the lane has to be clear for the drag to be used.</summary>
+        private const float LaneProbe = 4.4f;
+
+        /// <summary>The most either leg of the fetch is given, going or coming.</summary>
+        private const int FetchWalkMs = 60000;
+
+        /// <summary>No progress for this long on a fetch leg is a man who is not getting there.</summary>
+        private const int FetchStuckMs = 9000;
+
+        // ---- the haul: pickup, drag, put-down ------------------------------------
+
+        private enum Haul { Pickup, Drag, Putdown }
+
+        private Haul _haul;
+        private int _haulAt;
+        private int _dragAt;
+        private int _passes;
+        private float _dragged;
+        private Vector3 _passFrom;
+
+        /// <summary>A ceiling on the whole drag, and on passes of it.</summary>
+        private const int DragMs = 10000;
+        private const int MostPasses = 8;
+        private const int PutdownMs = 4500;
+
+        /// <summary>The second man's spots: beside the trolley while the drag goes past, then at its foot end.</summary>
+        private Vector3 _sideSpot;
+        private Vector3 _footSpot;
+        private bool _mateSent;
+
+        // ---- raising it with him on it --------------------------------------------
+
+        private bool _viaDrag;
+        private bool _raising;
+        private int _raiseAt;
+        private float _raiseLen;
+        private bool _resettled;
+        private Vector3 _settlePelvis;
+        private float _settleHeading;
+
+        /// <summary>The part of the floor-lift clip during which the trolley actually rises.</summary>
+        private const float RaiseFrom = 0.25f;
+        private const float RaiseTo = 0.80f;
+
         /// <summary>Whether the pushing pose has had to be re-issued with the stronger flags.</summary>
         private bool _pushHard;
 
@@ -468,6 +555,15 @@ namespace CodeThree.Scene
                 _loadLen = 0f;
                 _mateTo = Vector3.Zero;
                 _medicScene = null;
+                _fetcher = null;
+                _dragLane = false;
+                _viaDrag = false;
+                _raising = false;
+                _resettled = false;
+                _mateSent = false;
+                _passes = 0;
+                _dragged = 0f;
+                _haul = Haul.Pickup;
                 _vanAt = from;
                 _vanHeading = _van.Heading;
                 _heldAt = Game.GameTime;
@@ -1757,75 +1853,333 @@ namespace CodeThree.Scene
         /// so the carry from his arms to the bed is a short step sideways rather than a flight
         /// across the pavement, and nobody is standing where it appears.
         /// </summary>
+        /// <summary>
+        /// The second man goes back to the van for the trolley, pulls it out of the back,
+        /// wheels it over, and drops it to the road beyond the patient's head.
+        ///
+        /// NOTHING APPEARS OUT OF NOTHING ANY MORE. The trolley used to be created on the road
+        /// beside him the moment he was pronounced, and it was in every report as "the
+        /// stretcher is spawned". It is created in the back of the ambulance, with the doors
+        /// open, and the second man eases it out, takes the back of it and pushes it over the
+        /// way the driver pushes it back -- same pose, same trolley-in-front-of-him -- then
+        /// bends to the release and it drops to the road, undercarriage under the tarmac,
+        /// canvas at road height. The driver kneels by the patient until it arrives.
+        /// </summary>
         private void Fetching(int now)
         {
             if (!Crew.There(_body)) { Leave(now, "the body had gone"); return; }
 
             if (Entering())
             {
-                // THE DOORS STAY SHUT UNTIL THE TROLLEY IS COMING. They used to be opened here,
-                // a full minute before anybody went near the van, and an ambulance's rear doors
-                // swing out a metre either side -- so every walk to the back of it ended against
-                // a door. They open when the wheeling starts; see Wheeling.
-                if (_kit.There) _kit.Bring(_mate);
+                Look(_driver);
 
-                Vector3 spot;
-                float along;
-                Lay_out(out spot, out along);
+                Plan();
 
-                Vector3 pelvis;
-                var nearZ = Crew.Pelvis(_body, out pelvis) ? pelvis.Z - 0.1f : _body.Position.Z;
+                _fetcher = Crew.Alive(_mate) ? _mate : _driver;
 
-                if (!_trolley.Bring(spot, along, nearZ)) _carrying = true;
+                if (_vanLost || !Crew.Alive(_van) || !Crew.Alive(_fetcher))
+                {
+                    Log.Warn("There is no van to fetch the trolley from; it is put down by him instead.");
+                    Spawn_(now);
+                    return;
+                }
+
+                if (float.IsNaN(_vanRear)) Measure_();
+
+                _vanSpot = Crew.Offset(_van, 0f, _vanRear - _trolley.HalfLength - 0.6f - _cfg.TrolleyPushY, 0f);
+
+                Crew.WalkTo(_fetcher, _vanSpot, _van.Heading, 1.6f, FetchWalkMs);
+
+                _fetch = Fetch.Going;
+                _fetchAt = now;
+                _doorsOpened = false;
+                _fetchLast = _fetcher.Position;
+                _fetchLastAt = now;
+
+                Log.Info("The " + (_fetcher == _mate ? "second man" : "driver") + " goes back for the trolley, " +
+                         (int)Motion.FlatDistance(_fetcher.Position, _vanSpot) + "m away.");
+                return;
             }
 
-            if (now - _stepAt < _cfg.FetchMs) return;
+            switch (_fetch)
+            {
+                case Fetch.Going:
+                {
+                    if (!Crew.Alive(_fetcher) || !Crew.Alive(_van)) { Spawn_(now); return; }
 
-            To(_carrying ? Step.Loading : Step.Lifting, now);
+                    var d = Motion.FlatDistance(_fetcher.Position, _vanSpot);
+
+                    if (!_doorsOpened && d < 3.5f) { _doorsOpened = true; Doors(true); }
+
+                    if (d > 0.7f && now - _fetchAt < FetchWalkMs && !Stalled(now)) return;
+
+                    if (d > 2.5f)
+                    {
+                        Log.Warn("He could not get to the back of the van (" + d.ToString("0.0") +
+                                 "m off); the trolley is put down by the patient instead.");
+                        Doors(false);
+                        Spawn_(now);
+                        return;
+                    }
+
+                    if (!_doorsOpened) { _doorsOpened = true; Doors(true); }
+
+                    _fetch = Fetch.Opening;
+                    _fetchAt = now;
+                    return;
+                }
+
+                case Fetch.Opening:
+                {
+                    if (!DoorsAre(true) && now - _fetchAt < 2500) return;
+
+                    if (!_trolley.Appear(_van))
+                    {
+                        _carrying = true;
+                        Doors(false);
+                        To(Step.Lifting, now);
+                        return;
+                    }
+
+                    // Out to exactly where it will sit in front of him when he takes hold, read
+                    // off where he actually stands -- so taking hold moves it by nothing.
+                    var to = _fetcher.Position + _fetcher.ForwardVector * _cfg.TrolleyPushY
+                                               + _fetcher.RightVector * _cfg.TrolleyPushX;
+
+                    _trolley.RollOutFrom(to, _fetcher.Heading);
+
+                    _loadLen = Anim.Duration(Anim.LoadDict, Anim.LoadClip);
+                    Anim.Play(_fetcher, Anim.LoadDict, Anim.LoadClip, Anim.Hold, -1, 4f);
+
+                    _fetch = Fetch.Unloading;
+                    _fetchAt = now;
+                    return;
+                }
+
+                case Fetch.Unloading:
+                {
+                    var t = Phase_(now, _fetchAt, _loadLen, LoadFrom, LoadTo);
+
+                    if (t < 1f)
+                    {
+                        if (t > 0f) _trolley.RollOut(Motion.Smooth(t));
+                        return;
+                    }
+
+                    _trolley.RollOut(1f);
+                    Doors(false);
+
+                    _trolley.Take(_fetcher);
+                    _pushHard = false;
+                    _pushWarned = false;
+
+                    Crew.WalkTo(_fetcher, _parkStop, _parkHeading, 1f, FetchWalkMs);
+
+                    _fetch = Fetch.Bringing;
+                    _fetchAt = now;
+                    _fetchLast = _fetcher.Position;
+                    _fetchLastAt = now;
+
+                    Log.Info("He wheels it over, " + (int)Motion.FlatDistance(_fetcher.Position, _parkStop) + "m.");
+                    return;
+                }
+
+                case Fetch.Bringing:
+                {
+                    if (!Crew.Alive(_fetcher)) { _trolley.Park(!_dragLane); Spawn_(now); return; }
+
+                    Push_(_fetcher, now - _fetchAt);
+
+                    var there = Motion.FlatDistance(_fetcher.Position, _parkStop) < 0.5f;
+
+                    if (!there && now - _fetchAt < FetchWalkMs && !Stalled(now)) return;
+
+                    Anim.Stop(_fetcher, Anim.PushDict, Anim.PushClip);
+
+                    if (!there)
+                    {
+                        Log.Warn("The trolley stopped " + Motion.FlatDistance(_trolley.Where, _park).ToString("0.0") +
+                                 "m short of where it was wanted.");
+                    }
+
+                    // WHERE IT ACTUALLY STOPPED IS WHERE IT IS. The plan was a spot; the trolley
+                    // is a fact, and the drag, the foot end and the lift all go by the fact.
+                    _park = _trolley.Where;
+
+                    _trolley.Park(!_dragLane);
+
+                    if (!_dragLane)
+                    {
+                        _fetch = Fetch.Pause;
+                        _fetchAt = now;
+                        return;
+                    }
+
+                    // Bent to the release, and it drops as he does.
+                    _loadLen = Anim.Duration(Anim.LowerDict, Anim.LowerClip);
+                    Anim.Play(_fetcher, Anim.LowerDict, Anim.LowerClip, Anim.Hold, -1, 4f);
+
+                    _fetch = Fetch.Lowering;
+                    _fetchAt = now;
+                    return;
+                }
+
+                case Fetch.Lowering:
+                {
+                    var t = Phase_(now, _fetchAt, _loadLen, 0.2f, 0.8f);
+
+                    if (t < 1f)
+                    {
+                        if (t > 0f) _trolley.Lower(Motion.Smooth(t));
+                        return;
+                    }
+
+                    _trolley.Lower(1f);
+
+                    Log.Info("The trolley is down on the road beyond his head, " +
+                             Motion.FlatDistance(_park, _body.Position).ToString("0.0") + "m from him.");
+
+                    _fetch = Fetch.Pause;
+                    _fetchAt = now;
+                    return;
+                }
+
+                case Fetch.Pause:
+                    if (now - _fetchAt < _cfg.FetchMs) return;
+
+                    To(_carrying ? Step.Loading : Step.Lifting, now);
+                    return;
+            }
         }
 
-        private void Lay_out(out Vector3 spot, out float along)
+        /// <summary>Whether the fetcher has gone nowhere for long enough to be called stuck.</summary>
+        private bool Stalled(int now)
         {
-            Vector3 end;
-            float ignored;
+            if (!Crew.Alive(_fetcher)) return true;
 
-            // WHERE HE ACTUALLY IS, BEFORE WHERE THE CLIP SAYS HE WILL BE. His pelvis is a fact;
-            // the clip's end mark is a prediction from the engine that was once fourteen metres
-            // out, and the trolley was laid out beside that prediction -- up a bank, by a fence,
-            // "in the sky". The prediction is used when it is within a few metres of him, which
-            // is what a lift does, and otherwise he is where the trolley goes.
+            if (Motion.FlatDistance(_fetcher.Position, _fetchLast) > 0.6f)
+            {
+                _fetchLast = _fetcher.Position;
+                _fetchLastAt = now;
+                return false;
+            }
+
+            return now - _fetchLastAt > FetchStuckMs;
+        }
+
+        /// <summary>The van's rear, off its model, once.</summary>
+        private void Measure_()
+        {
+            Vector3 min, max;
+            _vanRear = Crew.Measure(Crew.Van, out min, out max) ? min.Y : -3f;
+        }
+
+        /// <summary>
+        /// The old way, kept for when there is no van to fetch from: the trolley put down where
+        /// it is wanted, dropped if it is to be dragged onto. The one teleport left, and only
+        /// when there is nothing to wheel it out of.
+        /// </summary>
+        private void Spawn_(int now)
+        {
+            Vector3 pelvis;
+            var nearZ = Crew.Pelvis(_body, out pelvis) ? pelvis.Z - 0.1f : _body.Position.Z;
+
+            if (!_trolley.Bring(_park, _parkHeading, nearZ))
+            {
+                _carrying = true;
+            }
+            else
+            {
+                _trolley.Park(!_dragLane);
+                if (_dragLane) _trolley.Lower(1f);
+            }
+
+            _fetch = Fetch.Pause;
+            _fetchAt = now;
+        }
+
+        /// <summary>
+        /// Where the trolley goes, and how he gets onto it.
+        ///
+        /// BEYOND HIS HEAD IF THE LANE IS CLEAR. The pickup is from behind and the drag goes
+        /// backwards along his own line, so the trolley is dropped on that line past his head,
+        /// pointed at him, far enough that the man doing the lifting is clear of it while he
+        /// lifts and on the canvas by the time he has backed up with him. A wall, a car, a lamp
+        /// post or a drop within that reach and it is the old way: a standing trolley beside
+        /// him, and a carry.
+        /// </summary>
+        private void Plan()
+        {
             Vector3 pelvis;
             if (!Crew.Pelvis(_body, out pelvis)) pelvis = _body.Position;
 
-            if (_scene == null || !_scene.Mark(Anim.LiftDict, Anim.LiftBody, 1f, out end, out ignored) ||
-                Motion.FlatDistance(end, pelvis) > 3f)
+            _dragLane = false;
+
+            try
             {
-                end = pelvis;
+                var lying = Crew.Lying(_body);
+
+                if (!float.IsNaN(lying))
+                {
+                    _lane = Motion.Facing(lying);
+
+                    var from = pelvis + new Vector3(0f, 0f, 0.55f);
+                    var to = from + _lane * LaneProbe;
+
+                    var hit = World.Raycast(from, to,
+                                            IntersectFlags.Map | IntersectFlags.Vehicles | IntersectFlags.Objects,
+                                            _body);
+
+                    var far = pelvis + _lane * DragReach;
+                    var ground = Crew.Ground(far, pelvis.Z);
+                    var level = Math.Abs(ground - pelvis.Z) < 0.8f;
+
+                    _dragLane = !hit.DidHit && level;
+
+                    if (!_dragLane)
+                    {
+                        Log.Info("The lane beyond his head is " + (hit.DidHit ? "blocked" : "not level") +
+                                 "; he goes onto a standing trolley beside him instead.");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not probe the lane: " + ex.Message);
+                _dragLane = false;
             }
 
-            var stance = Vector3.Zero;
-            var haveStance = _scene != null &&
-                             _scene.Mark(Anim.LiftDict, Anim.LiftMedic, 0f, out stance, out ignored) &&
-                             Motion.FlatDistance(stance, pelvis) <= 3f;
+            if (_dragLane)
+            {
+                _park = pelvis + _lane * DragReach;
+                _parkHeading = Motion.HeadingOf(-_lane);
+                _parkStop = _park + _lane * _cfg.TrolleyPushY;
+                return;
+            }
 
-            var line = haveStance ? Motion.Flat(end - stance) : Motion.Facing(_body.Heading);
-            if (line.Length() < 0.3f) line = Motion.Facing(_body.Heading);
-            line = line.Normalized;
+            Lay_out(out _park, out _parkHeading);
+            _parkStop = _park - Motion.Facing(_parkHeading) * _cfg.TrolleyPushY;
+        }
 
-            var toVan = Crew.Alive(_van) ? Motion.Flat(_van.Position - end) : Vector3.Zero;
+        /// <summary>Beside him, parallel, on the van's side, pointed towards the van. The carry's lay-out.</summary>
+        private void Lay_out(out Vector3 spot, out float along)
+        {
+            Vector3 pelvis;
+            if (!Crew.Pelvis(_body, out pelvis)) pelvis = _body.Position;
+
+            var line = Motion.Facing(_body.Heading);
+
+            var toVan = Crew.Alive(_van) ? Motion.Flat(_van.Position - pelvis) : Vector3.Zero;
 
             var side = new Vector3(-line.Y, line.X, 0f);
             if (Vector3.Dot(side, toVan) < 0f) side = -side;
 
-            // Parallel to the lift line, pointing whichever way is more towards the van -- so
-            // the back of it is where the medic will stand and forward is where he will push.
+            // Parallel to him, pointing whichever way is more towards the van -- so the back of
+            // it is where the medic will stand and forward is where he will push.
             var forward = Vector3.Dot(line, toVan) >= 0f ? line : -line;
 
-            spot = end + side * 0.9f;
+            spot = pelvis + side * 0.9f;
             along = Motion.HeadingOf(forward);
-
-            Log.Debug("Trolley laid out " + Motion.FlatDistance(spot, _body.Position).ToString("0.00") +
-                      "m from him, " + (haveStance ? "off the lift's own marks." : "off his heading."));
         }
 
         // ---- lifting him --------------------------------------------------------
@@ -1842,6 +2196,10 @@ namespace CodeThree.Scene
             {
                 _sceneAt = 0;
                 _liftLogged = false;
+                _haul = Haul.Pickup;
+                _passes = 0;
+                _dragged = 0f;
+                _mateSent = false;
 
                 if (!Crew.Alive(_body))
                 {
@@ -1862,7 +2220,23 @@ namespace CodeThree.Scene
                 Pose(Anim.LiftDict, Anim.LiftBody, Crew.Lying(_body), pelvis, 2f, Sync.Settle, now);
                 Crew.Hold(_body);
 
-                Steady();
+                // The second man: out of the lane while the drag comes down it, to the side of
+                // the dropped trolley; or, for a carry, to the far side of the standing one.
+                if (_dragLane && _trolley.There && _trolley.Dropped)
+                {
+                    var right = new Vector3(_lane.Y, -_lane.X, 0f);
+
+                    _sideSpot = _park + right * 1.2f - _lane * 0.8f;
+                    _footSpot = _park - _lane * (_trolley.HalfLength + 0.45f);
+
+                    if (Crew.Alive(_mate)) Step_(_mate, _sideSpot, Motion.HeadingOf(-right), 6000);
+                }
+                else
+                {
+                    _dragLane = false;
+                    Steady();
+                }
+
                 return;
             }
 
@@ -1918,6 +2292,7 @@ namespace CodeThree.Scene
                 _medicScene.Rate(1f);
                 _scene.Rate(1f);
                 _sceneAt = now;
+                _haulAt = now;
 
                 // SAID OUT LOUD, so the next log answers "did it line up" with numbers: how far
                 // the medic was from the spot the clip starts him on when he joined, and how far
@@ -1928,26 +2303,173 @@ namespace CodeThree.Scene
                 return;
             }
 
-            var age = now - _sceneAt;
+            var age = now - _haulAt;
 
-            // AND AGAIN HALF A SECOND IN, once the mover blend has had its quarter second: where
-            // the medic actually ended up relative to his mark, and how high each of them sits
-            // over the road. A medic a metre up or a metre under is the scene's height
-            // convention being wrong for his half of the pair, and this is the line that says so.
-            if (!_liftLogged && age >= 600)
+            switch (_haul)
             {
-                _liftLogged = true;
-                Settled();
+                case Haul.Pickup:
+                {
+                    // AND AGAIN HALF A SECOND IN, once the mover blend has had its quarter
+                    // second: where the medic actually ended up relative to his mark, and how
+                    // high each of them sits over the road. A medic a metre up or a metre under
+                    // is the scene's height convention being wrong for his half of the pair.
+                    if (!_liftLogged && age >= 600)
+                    {
+                        _liftLogged = true;
+                        Settled();
+                    }
+
+                    if (age < 300) return;
+
+                    var phase = _scene.Phase;
+                    var done = phase >= 0.985f || (phase < 0f && age > 1200) || age > LiftMs;
+
+                    if (!done) return;
+
+                    if (!_dragLane || !_trolley.There || !_trolley.Dropped)
+                    {
+                        To(Step.Loading, now);
+                        return;
+                    }
+
+                    _dragAt = now;
+                    Chain(Haul.Drag, now);
+                    return;
+                }
+
+                case Haul.Drag:
+                {
+                    if (age < 200) return;
+
+                    Vector3 pelvis;
+                    if (!Crew.Pelvis(_body, out pelvis)) pelvis = _body.Position;
+
+                    // ON THE CANVAS WHEN HIS PELVIS IS OVER ITS MIDDLE: the drag is measured off
+                    // him, not timed, so it stops where he is rather than where he was expected.
+                    var reached = Vector3.Dot(Motion.Flat(pelvis - _park), _lane) >= -0.05f;
+
+                    if (reached)
+                    {
+                        _dragged += Motion.FlatDistance(pelvis, _passFrom);
+                        Chain(Haul.Putdown, now);
+                        return;
+                    }
+
+                    var phase = _scene.Phase;
+                    var passDone = phase >= 0.985f || (phase < 0f && age > 1200) || age > 4000;
+
+                    if (!passDone) return;
+
+                    var moved = Motion.FlatDistance(pelvis, _passFrom);
+                    _dragged += moved;
+
+                    if (moved < 0.08f || _passes >= MostPasses || now - _dragAt > DragMs)
+                    {
+                        Log.Warn("The drag stopped " + Motion.FlatDistance(pelvis, _park).ToString("0.0") +
+                                 "m short of the canvas after " + _passes + " pass" + (_passes == 1 ? "" : "es") +
+                                 (moved < 0.08f ? " -- the last one moved him by nothing." : "."));
+                        Chain(Haul.Putdown, now);
+                        return;
+                    }
+
+                    // Another pass, from exactly where this one left them.
+                    Chain(Haul.Drag, now);
+                    return;
+                }
+
+                case Haul.Putdown:
+                {
+                    // The second man to the foot end as he goes down, to take it for the lift.
+                    if (!_mateSent && age > 300)
+                    {
+                        _mateSent = true;
+                        if (Crew.Alive(_mate)) Step_(_mate, _footSpot, Motion.HeadingOf(_lane), 6000);
+                    }
+
+                    if (age < 300) return;
+
+                    var phase = _scene.Phase;
+                    var done = phase >= 0.985f || (phase < 0f && age > 1200) || age > PutdownMs;
+
+                    if (!done) return;
+
+                    Vector3 pelvis;
+                    if (!Crew.Pelvis(_body, out pelvis)) pelvis = _body.Position;
+
+                    Log.Info("Dragged " + _dragged.ToString("0.0") + "m in " + _passes + " pass" + (_passes == 1 ? "" : "es") +
+                             " and put down " + (_trolley.Over(pelvis) ? "on the canvas, " : "OFF the canvas, ") +
+                             Motion.FlatDistance(pelvis, _park).ToString("0.00") + "m from its middle.");
+
+                    To(Step.Loading, now);
+                    return;
+                }
+            }
+        }
+
+        /// <summary>
+        /// The next clip of the haul, on both of them, anchored exactly where this one left
+        /// the patient.
+        ///
+        /// THE PAIR CHAINS: the pickup ends in the pose the drag starts in, and the drag ends
+        /// in the pose the put-down starts in -- the game's own task plays them back to back.
+        /// So each new scene is built so that its clip's first frame puts the patient's root
+        /// where his root is now, at the height convention the lift was measured at, and the
+        /// medic's half from its own copy a step behind, as for the lift. A drag pass is one
+        /// run of the drag clip, not a loop: a looped scene snaps its mover back to the start
+        /// every time round, so the drag is a chain of single passes instead, each anchored
+        /// where the last one ended, and it goes on until his pelvis is over the canvas.
+        /// </summary>
+        private void Chain(Haul stage, int now)
+        {
+            _haul = stage;
+            _haulAt = now;
+
+            var bodyClip = stage == Haul.Drag ? Anim.DragBody : Anim.PutdownBody;
+            var medicClip = stage == Haul.Drag ? Anim.DragMedic : Anim.PutdownMedic;
+
+            if (stage == Haul.Drag)
+            {
+                _passes++;
+                if (!Crew.Pelvis(_body, out _passFrom)) _passFrom = _body.Position;
             }
 
-            if (age < 300) return;
+            try
+            {
+                var height = _scene != null ? _scene.Origin.Z : _body.Position.Z;
 
-            var phase = _scene.Phase;
-            var done = phase >= 0.985f || (phase < 0f && age > 1200) || age > LiftMs;
+                var next = Sync.Anchored(Anim.LiftDict, bodyClip, _body.Position, _body.Heading).AtHeight(height);
+                var medic = next;
 
-            if (!done) return;
+                var back = _cfg.LiftStandBack;
 
-            To(Step.Loading, now);
+                if (Math.Abs(back) > 0.005f)
+                {
+                    Vector3 ignored;
+                    float facing;
+
+                    if (!next.Mark(Anim.LiftDict, medicClip, 0f, out ignored, out facing)) facing = _driver.Heading;
+
+                    medic = next.Shifted(-Motion.Facing(facing) * back);
+                }
+
+                var okBody = next.Begin(false, true) && next.Cast(_body, Anim.LiftDict, bodyClip);
+                var okMedic = (medic == next || medic.Begin(false, true)) &&
+                              medic.Cast(_driver, Anim.LiftDict, medicClip);
+
+                _scene = next;
+                _medicScene = medic;
+
+                if (!okBody || !okMedic)
+                {
+                    Log.Warn("Could not chain " + (!okBody && !okMedic ? "either of them" : !okBody ? "the patient" : "the medic") +
+                             " into " + bodyClip + ".");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("The haul could not go on to " + bodyClip + ": " + ex.Message);
+                To(Step.Loading, now);
+            }
         }
 
         private void Settled()
@@ -2055,6 +2577,36 @@ namespace CodeThree.Scene
                 }
 
                 _laid = false;
+                _viaDrag = false;
+                _raising = false;
+                _resettled = false;
+
+                // DRAGGED ONTO IT AND PUT DOWN ON IT: he is attached where he lies and the
+                // trolley is raised with him on it, both men lifting. Nothing is carried.
+                if (_dragLane && _trolley.There && _trolley.Dropped)
+                {
+                    Vector3 pelvis;
+                    if (!Crew.Pelvis(_body, out pelvis)) pelvis = _body.Position;
+
+                    if (_trolley.Over(pelvis))
+                    {
+                        _settlePelvis = pelvis;
+                        _settleHeading = _body.Heading;
+
+                        if (_trolley.Settle(_body))
+                        {
+                            _viaDrag = true;
+                            _laid = true;
+                            _laidAt = now;
+                            return;
+                        }
+                    }
+
+                    // He missed it, or it would not take him: up it comes empty, and he is
+                    // carried onto it the old way -- the one slide left, and it is logged.
+                    Log.Warn("He was put down off the canvas; the trolley is raised empty and he is carried onto it.");
+                    _trolley.Lower(0f);
+                }
 
                 if (!_trolley.Bed(out _carryTo, out _carryToHeading))
                 {
@@ -2085,6 +2637,12 @@ namespace CodeThree.Scene
                 _squared = false;
 
                 _sceneAt = now;
+                return;
+            }
+
+            if (_viaDrag)
+            {
+                Raise_(now);
                 return;
             }
 
@@ -2134,7 +2692,98 @@ namespace CodeThree.Scene
 
             if (!set && now - _laidAt < _cfg.LoadMs) return;
 
+            Off_(now);
+        }
+
+        /// <summary>
+        /// Up off the road with him on it, both men lifting.
+        ///
+        /// The second man was sent to the foot end as the put-down began; the driver is at the
+        /// head end, where backing up with him left him. When the second man is there -- or
+        /// has had his time -- both bend to the rails in the floor lift, and the trolley rises
+        /// through the middle of the clip, canvas, patient and all, to stand on its wheels.
+        /// </summary>
+        private void Raise_(int now)
+        {
+            // A tick after the attach: whatever it moved him by, taken back out. See Resettle.
+            if (!_resettled && now - _laidAt >= 60)
+            {
+                _resettled = true;
+                _trolley.Resettle(_settlePelvis, _settleHeading);
+            }
+
+            if (!_raising)
+            {
+                var mateThere = !Crew.Alive(_mate) ||
+                                Motion.FlatDistance(_mate.Position, _footSpot) < 0.6f;
+
+                if (!mateThere && now - _laidAt < _cfg.LoadMs) return;
+
+                if (!mateThere) Log.Info("The second man did not get to the foot end in time; it is raised without him.");
+
+                // Facing along it, the two of them, before the bend.
+                if (Crew.Alive(_driver)) _driver.Heading = Motion.HeadingOf(-_lane);
+                if (Crew.Alive(_mate) && mateThere) _mate.Heading = Motion.HeadingOf(_lane);
+
+                _raiseLen = Anim.Duration(Anim.LoadDict, Anim.RaiseClip);
+
+                var a = Anim.Play(_driver, Anim.LoadDict, Anim.RaiseClip, Anim.Hold, -1, 4f);
+                var b = !Crew.Alive(_mate) || !mateThere ||
+                        Anim.Play(_mate, Anim.LoadDict, Anim.RaiseClip, Anim.Hold, -1, 4f);
+
+                if (!a || !b) Log.Warn("The floor lift would not play; the trolley comes up regardless.");
+
+                _raising = true;
+                _raiseAt = now;
+                return;
+            }
+
+            var t = Phase_(now, _raiseAt, _raiseLen, RaiseFrom, RaiseTo);
+
+            if (t < 1f)
+            {
+                if (t > 0f) _trolley.Raise(Motion.Smooth(t));
+                return;
+            }
+
+            _trolley.Raise(1f);
+
+            Log.Info("Raised, with him on it.");
+
+            Off_(now);
+        }
+
+        /// <summary>
+        /// Away with him: the second man takes the bag and goes to the van, the driver takes
+        /// the back of the trolley, and the wheeling starts.
+        ///
+        /// THE DRIVER WALKS TO THE TROLLEY, NOT THE TROLLEY TO THE DRIVER. He is already at the
+        /// head end after a drag; after a carry he was sent round. Either way his taking hold
+        /// should move it by nothing, which it does when he is at Behind facing along it; so
+        /// if he is more than a stride from it he is sent there first and this is called again.
+        /// </summary>
+        private void Off_(int now)
+        {
+            if (Crew.Alive(_driver) && Motion.FlatDistance(_driver.Position, _trolley.Behind) > 0.5f &&
+                now - _laidAt < _cfg.LoadMs + MarkMs)
+            {
+                if (_walk == Walk.None)
+                {
+                    _walk = Walk.Going;
+                    _walkAt = now;
+                    _walkTo = _trolley.Behind;
+                    Step_(_driver, _trolley.Behind, _trolley.AlongHeading, MarkMs);
+                }
+
+                return;
+            }
+
+            if (_kit.There && Crew.Alive(_mate)) _kit.Bring(_mate);
+
             _trolley.Take(_driver);
+
+            _pushHard = false;
+            _pushWarned = false;
 
             Walk_(now);
 
@@ -2167,6 +2816,8 @@ namespace CodeThree.Scene
 
         private void Carrying(int now)
         {
+            if (_kit.There && Crew.Alive(_mate)) _kit.Bring(_mate);
+
             Walk_(now);
             To(Step.Wheeling, now);
         }
@@ -2197,11 +2848,7 @@ namespace CodeThree.Scene
         {
             if (!Crew.Alive(_van)) return;
 
-            if (float.IsNaN(_vanRear))
-            {
-                Vector3 min, max;
-                _vanRear = Crew.Measure(Crew.Van, out min, out max) ? min.Y : -3f;
-            }
+            if (float.IsNaN(_vanRear)) Measure_();
 
             var back = _carrying ? 1.0f : _cfg.TrolleyPushY + _trolley.HalfLength + 0.5f;
 
@@ -2224,33 +2871,7 @@ namespace CodeThree.Scene
         {
             // THE DOORS STAY SHUT UNTIL HE IS AT THEM. See Stowing: they open when the trolley
             // arrives at the rear, the way a crew actually does it, and not a moment before.
-            if (!_carrying)
-            {
-                // The shopping-trolley pose on his upper body, over the walk his task gives him;
-                // and the trolley in front of him at the road's height, every tick.
-                //
-                // AND THE STRONGER FLAGS IF THE FIRST ARE REFUSED. The log said the pose was not
-                // taking: the navmesh walk clears a secondary clip when it starts a new leg,
-                // and re-issuing every tick just restarts it on frame nought. A second in with
-                // nothing on him, it is re-issued not-interruptable, which the movement task
-                // leaves alone. See Anim.PushHard.
-                var playing = Anim.IsPlaying(_driver, Anim.PushDict, Anim.PushClip);
-
-                if (!playing && !_pushHard && now - _stepAt > 1000)
-                {
-                    _pushHard = true;
-                    Anim.Stop(_driver, Anim.PushDict, Anim.PushClip);
-                }
-
-                Anim.Play(_driver, Anim.PushDict, Anim.PushClip, _pushHard ? Anim.PushHard : Anim.Push);
-                _trolley.Follow();
-
-                if (!_pushWarned && _pushHard && now - _stepAt > 2500 && !playing)
-                {
-                    _pushWarned = true;
-                    Log.Warn("The pushing pose is not taking on the medic even not-interruptable.");
-                }
-            }
+            if (!_carrying) Push_(_driver, now - _stepAt);
 
             var there = Crew.Alive(_driver) && Motion.FlatDistance(_driver.Position, _stopAt) < 0.6f;
 
@@ -2457,15 +3078,56 @@ namespace CodeThree.Scene
         /// </summary>
         private float RollPhase(int now)
         {
-            var age = (now - _stowAt) / 1000f;
-            var len = _loadLen > 0.5f ? _loadLen : RollMs / 1000f;
+            return Phase_(now, _stowAt, _loadLen, LoadFrom, LoadTo);
+        }
+
+        /// <summary>
+        /// Where a thing moved by a clip should be, nought to one, given when the clip started,
+        /// how long it runs and the part of it during which the thing moves. Past the clip's
+        /// end plus a beat it is one regardless. A clip whose length the engine would not give
+        /// is taken as the old fixed roll time.
+        /// </summary>
+        private static float Phase_(int now, int since, float len, float from, float to)
+        {
+            var age = (now - since) / 1000f;
+
+            if (len < 0.5f) len = RollMs / 1000f;
 
             if (age >= len + 0.5f) return 1f;
 
-            var from = len * LoadFrom;
-            var to = len * LoadTo;
+            return (age - len * from) / Math.Max(0.2f, len * (to - from));
+        }
 
-            return (age - from) / Math.Max(0.2f, to - from);
+        /// <summary>
+        /// The shopping-trolley pose on his upper body, over the walk his task gives him; and
+        /// the trolley in front of him at the road's height, every tick.
+        ///
+        /// AND THE STRONGER FLAGS IF THE FIRST ARE REFUSED. The log said the pose was not
+        /// taking: the navmesh walk clears a secondary clip when it starts a new leg, and
+        /// re-issuing every tick just restarts it on frame nought. A second in with nothing on
+        /// him, it is re-issued not-interruptable, which the movement task leaves alone. See
+        /// Anim.PushHard. The same for whoever is pushing, whichever way.
+        /// </summary>
+        private void Push_(Ped who, int age)
+        {
+            if (!Crew.Alive(who)) return;
+
+            var playing = Anim.IsPlaying(who, Anim.PushDict, Anim.PushClip);
+
+            if (!playing && !_pushHard && age > 1000)
+            {
+                _pushHard = true;
+                Anim.Stop(who, Anim.PushDict, Anim.PushClip);
+            }
+
+            Anim.Play(who, Anim.PushDict, Anim.PushClip, _pushHard ? Anim.PushHard : Anim.Push);
+            _trolley.Follow();
+
+            if (!_pushWarned && _pushHard && age > 2500 && !playing)
+            {
+                _pushWarned = true;
+                Log.Warn("The pushing pose is not taking on him even not-interruptable.");
+            }
         }
 
         /// <summary>
@@ -2722,9 +3384,15 @@ namespace CodeThree.Scene
                     case Step.Working:   return Working_();
                     case Step.Rising:    return "getting him up";
                     case Step.Pronounce: return "calling it";
-                    case Step.Fetching:  return "fetching the trolley";
-                    case Step.Lifting:   return "lifting him";
-                    case Step.Loading:   return _carrying ? "picking him up" : "onto the canvas";
+                    case Step.Fetching:  return _fetch == Fetch.Bringing ? "wheeling the trolley over"
+                                              : _fetch == Fetch.Lowering ? "dropping the trolley"
+                                              : "fetching the trolley";
+                    case Step.Lifting:   return _haul == Haul.Drag ? "dragging him onto the trolley"
+                                              : _haul == Haul.Putdown ? "laying him on it"
+                                              : "lifting him";
+                    case Step.Loading:   return _carrying ? "picking him up"
+                                              : _viaDrag ? "raising the trolley"
+                                              : "onto the canvas";
                     case Step.Wheeling:  return _carrying ? "carrying him back" : "wheeling him back";
                     case Step.Stowing:   return "into the back";
                     case Step.Driving:   return _to == Vector3.Zero ? "leaving" : "driving to the hospital";

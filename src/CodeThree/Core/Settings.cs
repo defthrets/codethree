@@ -201,7 +201,7 @@ namespace CodeThree.Core
         public int PronounceMs = 6000;
 
         /// <summary>Getting the trolley out and open beside him.</summary>
-        public int FetchMs = 3200;
+        public int FetchMs = 1200;
 
         /// <summary>And him onto it.</summary>
         public int LoadMs = 2800;
