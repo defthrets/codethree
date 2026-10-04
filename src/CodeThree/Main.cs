@@ -86,7 +86,8 @@ namespace CodeThree
                     () => _call.Out,
                     () => new[] { _call.At.X, _call.At.Y, _call.At.Z },
                     xyz => xyz != null && xyz.Length >= 3 &&
-                           _call.Still(new GTA.Math.Vector3(xyz[0], xyz[1], xyz[2])));
+                           _call.Still(new GTA.Math.Vector3(xyz[0], xyz[1], xyz[2])),
+                    handle => _call.IsPatient(handle));
 
                 _menu = new Options(_cfg)
                 {

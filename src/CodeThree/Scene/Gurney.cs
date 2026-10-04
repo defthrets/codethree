@@ -475,7 +475,7 @@ namespace CodeThree.Scene
         /// engine has its own ideas about a capsule -- so the first attach can shift him a few
         /// centimetres. Measured off his pelvis and removed, once.
         /// </summary>
-        public void Resettle(Vector3 pelvisBefore, float headingBefore)
+        public void Resettle(Vector3 pelvisBefore, float lyingBefore)
         {
             if (!There || !_keep || !Crew.There(_load)) return;
 
@@ -484,8 +484,14 @@ namespace CodeThree.Scene
                 Vector3 pelvisNow;
                 if (!Crew.Pelvis(_load, out pelvisNow)) return;
 
+                // BY HIS PELVIS AND THE WAY HE LIES, NOT BY HIS ROOT. The clip was changed under
+                // him as he was attached, and two lying clips put the drawn body at different
+                // turns from the same root; what has to end up where it was is the body.
+                var lyingNow = Crew.Lying(_load);
+
                 var moved = pelvisNow - pelvisBefore;
-                var turned = Motion.Wrap(_load.Heading - headingBefore);
+                var turned = float.IsNaN(lyingNow) || float.IsNaN(lyingBefore)
+                           ? 0f : Motion.Wrap(lyingNow - lyingBefore);
 
                 if (moved.Length() < 0.02f && Math.Abs(turned) < 2f)
                 {
@@ -642,18 +648,23 @@ namespace CodeThree.Scene
         /// foot-to-head are both lying along it; the correction is the smaller turn that puts
         /// his line parallel to the axis, so it never spins him a half-turn to swap ends.
         /// </summary>
-        public void Square(Ped body)
+        public bool Square(Ped body)
         {
-            if (_squared || !There || !Crew.There(body)) return;
-
-            _squared = true;
+            if (_squared) return true;
+            if (!There || !Crew.There(body)) return false;
 
             try
             {
                 var lying = Crew.Lying(body);
 
                 Vector3 pelvis;
-                if (float.IsNaN(lying) || !Crew.Pelvis(body, out pelvis)) return;
+
+                // NOT MEASURED IS NOT SQUARED. A man who cannot be read as lying -- stood up
+                // on the canvas by another script, or still half way through the blend -- is
+                // left for the caller to try again, rather than ticked off as done.
+                if (float.IsNaN(lying) || !Crew.Pelvis(body, out pelvis)) return false;
+
+                _squared = true;
 
                 // The turn that makes his line parallel to the long axis, whichever end is which.
                 var off = Motion.Wrap(lying - AlongHeading);
@@ -672,7 +683,7 @@ namespace CodeThree.Scene
                     Log.Warn("On the canvas: he is " + Math.Abs(lift * 100f).ToString("0") + "cm " +
                              (lift > 0 ? "under" : "over") + " the bed, which is further than any " +
                              "root convention explains. Left as set.");
-                    return;
+                    return true;
                 }
 
                 var turned = Math.Abs(off) > 3f;
@@ -687,10 +698,13 @@ namespace CodeThree.Scene
                          ", bed " + (_bedZ + _cfg.BodyOnTrolleyZ + _zFix).ToString("0.00") + ".");
 
                 if (turned || moved) OnCanvas();
+
+                return true;
             }
             catch (Exception ex)
             {
                 Log.Debug("Could not square him on the canvas: " + ex.Message);
+                return false;
             }
         }
 

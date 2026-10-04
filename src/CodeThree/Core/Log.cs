@@ -368,8 +368,28 @@ namespace CodeThree.Core
         /// with the trolley rising through the middle of the clip. Where the lane beyond his
         /// head is blocked -- a wall, a car, a drop -- it falls back to the standing trolley
         /// beside him and the old carry, and says so.
+        ///
+        /// 0.5.1 -- kept on the bed, and pushed from the right place.
+        ///
+        /// The first log of 0.5.0 named what had been standing him up: "walking". Another mod
+        /// that had chatted to him while he was alive gave him back to the city on its own
+        /// timer, mid-CPR and again while he waited for the lift, which walked him two and a
+        /// half metres off; on the trolley the same thing stood him up across the canvas and
+        /// the squaring, finding no lying man to measure, measured nothing. Now he is checked
+        /// every tick from the pronouncement to the hospital and put straight back -- into
+        /// the CPR, into the rest pose, into the lift's opening pose, into the lying clip on
+        /// the canvas and in the van -- and the squaring is kept at until it takes. The API
+        /// grew IsPatient so the other mod can be taught to leave him be.
+        ///
+        /// The second man's walk to the van was asked for on the tick he was cleared out of
+        /// the clipboard scenario and was dropped; it is asked a tick later and again if he
+        /// does not move. The parked trolley is never solid, because it is not on the navmesh
+        /// and the medic was walking into it on his way to his mark. The drag's reach is
+        /// shorter, so a clear lane is easier to find, and the log says what blocked one. And
+        /// the pusher stands a metre and a half from the trolley's centre rather than 1.1,
+        /// because at 1.1 he walked along inside its frame.
         /// </summary>
-        public const string Version = "0.5.0";
+        public const string Version = "0.5.1";
 
         /// <summary>The word on the splash row and at the top of the log.</summary>
         public const string Name = "Code Three";

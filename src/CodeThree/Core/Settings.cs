@@ -237,7 +237,14 @@ namespace CodeThree.Core
 
         /// <summary>The trolley in front of the medic pushing it.</summary>
         public float TrolleyPushX = 0f;
-        public float TrolleyPushY = 1.1f;
+        /// <summary>
+        /// A METRE AND A HALF, FOR A TROLLEY TWO METRES LONG. This is the distance from the
+        /// pusher's root to the trolley's centre, and the gurney measures 1.96m end to end, so
+        /// at the old 1.1 its near end was twelve centimetres in front of him: he walked along
+        /// inside the frame with his shins through the undercarriage. At 1.45 the near end is
+        /// half a metre out, where a man's hands are on a bar he is pushing.
+        /// </summary>
+        public float TrolleyPushY = 1.45f;
         public float TrolleyPushZ = 0f;
 
         /// <summary>

@@ -292,6 +292,19 @@ namespace CodeThree.Core
             catch { /* It plays at its own speed, which is the old behaviour. */ }
         }
 
+        /// <summary>
+        /// Jumps the scene to a phase. With the rate at nought and the last frame held, 0.999
+        /// is a clip parked on its final pose -- how a man is laid back into the end of the CPR
+        /// that failed him without playing it again.
+        /// </summary>
+        public void Seek(float phase)
+        {
+            if (_scene < 0) return;
+
+            try { Function.Call(Hash.SET_SYNCHRONIZED_SCENE_PHASE, _scene, phase); }
+            catch { /* It plays from the start, which is still him lying down. */ }
+        }
+
         /// <summary>0 at the start, 1 at the end. Negative when there is no scene.</summary>
         public float Phase
         {

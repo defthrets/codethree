@@ -335,6 +335,28 @@ namespace CodeThree.Scene
         /// <summary>Whether the back doors have been asked open for the fetch.</summary>
         private bool _doorsOpened;
 
+        /// <summary>Whether the fetch walk has been issued, and how many times it has been asked again.</summary>
+        private bool _fetchSent;
+        private int _fetchTries;
+
+        /// <summary>The most times a fetch leg is asked for again before it is given up on.</summary>
+        private const int FetchTries = 3;
+
+        // ---- keeping him where the scene has him ---------------------------------
+
+        /// <summary>
+        /// The scene he rests in after the pronouncement -- the last CPR clip's origin and
+        /// heading -- so that he can be laid back in it if another script gets him up.
+        /// </summary>
+        private Sync _rest;
+
+        /// <summary>When the patient was last put back, and how many times it has been said.</summary>
+        private int _keepAt;
+        private int _keepSaid;
+
+        /// <summary>Which way he lay before he was settled on the dropped trolley. See Gurney.Resettle.</summary>
+        private float _settleLying;
+
         /// <summary>Where the trolley is parked by the patient: its centre, and the way its long axis points.</summary>
         private Vector3 _park;
         private float _parkHeading;
@@ -354,11 +376,18 @@ namespace CodeThree.Scene
         /// </summary>
         private bool _dragLane;
 
-        /// <summary>How far beyond his pelvis the dropped trolley's centre is put, in metres.</summary>
-        private const float DragReach = 2.4f;
+        /// <summary>
+        /// How far beyond his pelvis the dropped trolley's centre is put, in metres.
+        ///
+        /// NEARER THAN IT WAS. At two and a half metres the lane had to be clear for four and a
+        /// half, and the first real scene called it blocked. At this the drag is a metre and a
+        /// half; the medic doing the pickup stands on the near end of the dropped canvas, which
+        /// is flat on the road and nothing to stand on.
+        /// </summary>
+        private const float DragReach = 1.9f;
 
         /// <summary>How far beyond his pelvis the lane has to be clear for the drag to be used.</summary>
-        private const float LaneProbe = 4.4f;
+        private const float LaneProbe = 3.4f;
 
         /// <summary>The most either leg of the fetch is given, going or coming.</summary>
         private const int FetchWalkMs = 60000;
@@ -395,7 +424,6 @@ namespace CodeThree.Scene
         private float _raiseLen;
         private bool _resettled;
         private Vector3 _settlePelvis;
-        private float _settleHeading;
 
         /// <summary>The part of the floor-lift clip during which the trolley actually rises.</summary>
         private const float RaiseFrom = 0.25f;
@@ -461,6 +489,16 @@ namespace CodeThree.Scene
         public bool Workable
         {
             get { return _step != Step.None && _verdict == Verdict.Workable; }
+        }
+
+        /// <summary>
+        /// Whether a ped is the man this crew are working on. For the other mods: a patient is
+        /// not to be chatted to, calmed, sent on his way or given back to the city by anybody
+        /// else until the call-out is over. See Api.Medics.IsPatient.
+        /// </summary>
+        public bool IsPatient(int handle)
+        {
+            return _step != Step.None && Crew.There(_body) && _body.Handle == handle;
         }
 
         // ---- the call ----------------------------------------------------------
@@ -564,6 +602,11 @@ namespace CodeThree.Scene
                 _passes = 0;
                 _dragged = 0f;
                 _haul = Haul.Pickup;
+                _rest = null;
+                _keepAt = 0;
+                _keepSaid = 0;
+                _fetchSent = false;
+                _fetchTries = 0;
                 _vanAt = from;
                 _vanHeading = _van.Heading;
                 _heldAt = Game.GameTime;
@@ -693,6 +736,8 @@ namespace CodeThree.Scene
                     return;
                 }
 
+                Keep_(now);
+
                 switch (_step)
                 {
                     case Step.Coming:    Coming(now);    break;
@@ -723,6 +768,7 @@ namespace CodeThree.Scene
             _entering = true;
             _walk = Walk.None;
             _groundWarned = false;
+            _keepAt = 0;
         }
 
         /// <summary>
@@ -822,27 +868,158 @@ namespace CodeThree.Scene
             }
         }
 
+        /// <summary>
+        /// A NOTE IN THE LOG, NOT A MOVE. This used to lift a man whose root read as under the
+        /// road, and it did it to men who were not: a lying clip keeps the root a metre from
+        /// the drawn body, so a correct pose can read a metre out either way, and the probe
+        /// reads the top of the trolley as the road when a man is beside it. Lifting a ped in a
+        /// paused scene left him hanging in the air until the scene ran; lifting one mid-carry
+        /// was undone a frame later. Every height is measured and corrected where it is set
+        /// now, so this only says what it saw, once a step, at debug level.
+        /// </summary>
         private void Lift(Ped who, string name)
         {
-            if (!Crew.Alive(who)) return;
+            if (!Crew.Alive(who) || _groundWarned) return;
 
             var above = Crew.Above(who);
             if (above > -0.45f) return;
 
-            // ONCE PER STEP, NOT EVERY TICK. A man under the road inside a synchronised scene is
-            // put there by the scene every frame, and a guard that lifts him every frame is two
-            // things moving one body in opposite directions forty times a second -- which is a
-            // patient juddering in the road. The scene's own height is corrected properly in
-            // CheckPose; this is the last resort, and it fires once so the log can say so.
-            if (_groundWarned) return;
-
             _groundWarned = true;
-            Log.Warn(name + " was " + (-above).ToString("0.00") + "m under the road while " +
-                     State + "; lifted once.");
+            Log.Debug(name + "'s root reads " + (-above).ToString("0.00") + "m under the road while " +
+                      State + " -- a root convention or a probe off a prop; not moved.");
+        }
 
-            var at = who.Position;
-            Function.Call(Hash.SET_ENTITY_COORDS_NO_OFFSET, who.Handle,
-                          at.X, at.Y, at.Z - above, false, false, false);
+        /// <summary>
+        /// The patient kept as the scene has him, whatever another script does to him.
+        ///
+        /// THE LOG NAMED THE CULPRIT: "walking". Another mod on this machine, having chatted to
+        /// him while he was alive, gave him back to the city on its own timer -- cleared his
+        /// tasks and sent him wandering -- in the middle of the CPR, and again while he lay
+        /// waiting for the lift, which walked him two and a half metres from the scene. The
+        /// uninterruptable scene flags stop the game's events; nothing stops a script. So every
+        /// tick he is checked against what he should be doing, and put straight back: into the
+        /// CPR he left, into the rest pose after the pronouncement, into the lift's opening
+        /// pose, into the lying clip on the trolley and in the van. Whatever he was found doing
+        /// goes in the log, a few times a call-out, for the next mod to be fixed.
+        /// </summary>
+        private void Keep_(int now)
+        {
+            if (_step < Step.Pronounce || _step == Step.Fleeing || !Crew.Alive(_body)) return;
+            if (now - _keepAt < 400) return;
+
+            try
+            {
+                string why;
+
+                // ON THE TROLLEY OR IN THE VAN: attached, and in the lying clip.
+                if (_laid || _bodyInVan)
+                {
+                    var attached = Function.Call<bool>(Hash.IS_ENTITY_ATTACHED, _body.Handle);
+                    var lying = Anim.IsPlaying(_body, Anim.DeadDict, Anim.DeadPose) ||
+                                Anim.IsPlaying(_body, Anim.DeadFallbackDict, Anim.DeadFallbackPose);
+
+                    if (attached && lying) return;
+
+                    _keepAt = now;
+                    Said_("The patient was " + (!attached ? "off the trolley" : "out of the lying pose") +
+                          " while " + State + " (" + Crew.Doing(_body) + "); put back.");
+
+                    if (!lying && !Anim.Play(_body, Anim.DeadDict, Anim.DeadPose, Anim.Hold, -1, 4f))
+                    {
+                        Anim.Play(_body, Anim.DeadFallbackDict, Anim.DeadFallbackPose, Anim.Hold, -1, 4f);
+                    }
+
+                    if (!attached)
+                    {
+                        if (_bodyInVan) InBack();
+                        else _trolley.Refit();
+                    }
+
+                    return;
+                }
+
+                switch (_step)
+                {
+                    case Step.Pronounce:
+                    case Step.Fetching:
+                        if (!Astray(0.35f, out why)) return;
+
+                        _keepAt = now;
+                        Said_("The patient was " + why + " while " + State + "; laid back down.");
+                        Rest_();
+                        return;
+
+                    case Step.Lifting:
+                        // Only while he waits in the opening pose. Once the haul is running he
+                        // is meant to be up, and walking backwards, and the scene has him.
+                        if (_sceneAt != 0 || _scene == null) return;
+                        if (!Astray(0.35f, out why)) return;
+
+                        _keepAt = now;
+                        Said_("The patient was " + why + " while " + State + "; put back into the lift.");
+                        PoseNow();
+                        return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("Could not keep the patient where he was: " + ex.Message);
+            }
+        }
+
+        /// <summary>Whether he is doing anything a man lying still would not be, and what.</summary>
+        private bool Astray(float upMax, out string why)
+        {
+            why = null;
+
+            var h = _body.Handle;
+
+            if (Function.Call<bool>(Hash.IS_PED_RAGDOLL, h)) why = "ragdolling";
+            else if (Function.Call<bool>(Hash.IS_PED_RUNNING, h) || Function.Call<bool>(Hash.IS_PED_WALKING, h)) why = "walking";
+            else if (Function.Call<bool>(Hash.IS_PED_USING_ANY_SCENARIO, h)) why = "in a scenario";
+            else
+            {
+                float up;
+                if (!Crew.Up(_body, out up) || up <= upMax) return false;
+
+                why = up.ToString("0.00") + "m up";
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Back into the pose he was pronounced in: the last CPR clip, held on its last frame,
+        /// in a fresh scene at the same origin as the one he was in.
+        /// </summary>
+        private void Rest_()
+        {
+            if (_rest == null || !Crew.Alive(_body)) return;
+
+            var scene = new Sync(_rest.Origin, _rest.Heading);
+
+            if (!scene.Begin(false, true) ||
+                !scene.Cast(_body, Anim.CprVictim, Anim.Failed, Sync.Snap, Sync.Snap))
+            {
+                Log.Warn("He could not be laid back down.");
+                return;
+            }
+
+            scene.Seek(0.999f);
+            scene.Rate(0f);
+
+            _rest = scene;
+
+            Crew.Hold(_body);
+        }
+
+        /// <summary>A few times a call-out, in the log; after that, quietly.</summary>
+        private void Said_(string line)
+        {
+            _keepSaid++;
+
+            if (_keepSaid <= 5) Log.Warn(line);
+            else if (_keepSaid == 6) Log.Warn("The patient keeps being taken out of the scene; not saying so again this call-out.");
         }
 
         private bool Entering()
@@ -1381,8 +1558,8 @@ namespace CodeThree.Scene
             if (_beat < 0 || _beat >= _beats.Length) return;
             if (now - _beatAt < 300 || now - _guardAt < 400) return;
 
-            float up;
-            if (!Crew.Up(_body, out up) || up < 0.55f) return;
+            string why;
+            if (!Astray(0.45f, out why)) return;
 
             _guardAt = now;
             _guarded++;
@@ -1391,7 +1568,7 @@ namespace CodeThree.Scene
 
             if (_guarded <= 3)
             {
-                Log.Warn("The patient was " + up.ToString("0.00") + "m up during " + beat.Clip +
+                Log.Warn("The patient was " + why + " during " + beat.Clip +
                          " (" + Crew.Doing(_body) + "); put back.");
             }
 
@@ -1787,6 +1964,10 @@ namespace CodeThree.Scene
                 // this moment, which sits him half up, and a man they have just given up on
                 // sitting up on his own was the most jarring thing in the scene. The lift pose
                 // is now the lift's business; see Lifting.
+                //
+                // AND REMEMBERED, so that if another script gets him up while he waits -- see
+                // Keep_ -- he can be laid back down in the same place in the same pose.
+                _rest = _scene;
                 _scene.End();
                 _scene = null;
 
@@ -1888,11 +2069,16 @@ namespace CodeThree.Scene
 
                 _vanSpot = Crew.Offset(_van, 0f, _vanRear - _trolley.HalfLength - 0.6f - _cfg.TrolleyPushY, 0f);
 
-                Crew.WalkTo(_fetcher, _vanSpot, _van.Heading, 1.6f, FetchWalkMs);
-
+                // THE WALK IS ASKED FOR A TICK LATER, NOT NOW. He has just been cleared out of
+                // the clipboard scenario, which plays its exit, and a walk asked for on the same
+                // tick as that clear was dropped: he stood there for nine seconds and the
+                // trolley was put down by magic. Asked a tick on, and asked again if he has not
+                // moved -- see Stalled -- it takes.
                 _fetch = Fetch.Going;
                 _fetchAt = now;
                 _doorsOpened = false;
+                _fetchSent = false;
+                _fetchTries = 0;
                 _fetchLast = _fetcher.Position;
                 _fetchLastAt = now;
 
@@ -1907,11 +2093,30 @@ namespace CodeThree.Scene
                 {
                     if (!Crew.Alive(_fetcher) || !Crew.Alive(_van)) { Spawn_(now); return; }
 
+                    if (!_fetchSent)
+                    {
+                        if (now - _fetchAt < 150) return;
+
+                        Send_(_vanSpot, _van.Heading, 1.6f, now);
+                        return;
+                    }
+
                     var d = Motion.FlatDistance(_fetcher.Position, _vanSpot);
 
                     if (!_doorsOpened && d < 3.5f) { _doorsOpened = true; Doors(true); }
 
-                    if (d > 0.7f && now - _fetchAt < FetchWalkMs && !Stalled(now)) return;
+                    if (d > 0.7f && now - _fetchAt < FetchWalkMs)
+                    {
+                        if (!Stalled(now)) return;
+
+                        if (_fetchTries < FetchTries)
+                        {
+                            _fetchTries++;
+                            Log.Info("He has not moved for the trolley; asked again (" + _fetchTries + ").");
+                            Send_(_vanSpot, _van.Heading, 1.6f, now);
+                            return;
+                        }
+                    }
 
                     if (d > 2.5f)
                     {
@@ -1972,13 +2177,12 @@ namespace CodeThree.Scene
                     _trolley.Take(_fetcher);
                     _pushHard = false;
                     _pushWarned = false;
+                    _fetchTries = 0;
 
-                    Crew.WalkTo(_fetcher, _parkStop, _parkHeading, 1f, FetchWalkMs);
+                    Send_(_parkStop, _parkHeading, 1f, now);
 
                     _fetch = Fetch.Bringing;
                     _fetchAt = now;
-                    _fetchLast = _fetcher.Position;
-                    _fetchLastAt = now;
 
                     Log.Info("He wheels it over, " + (int)Motion.FlatDistance(_fetcher.Position, _parkStop) + "m.");
                     return;
@@ -1986,13 +2190,24 @@ namespace CodeThree.Scene
 
                 case Fetch.Bringing:
                 {
-                    if (!Crew.Alive(_fetcher)) { _trolley.Park(!_dragLane); Spawn_(now); return; }
+                    if (!Crew.Alive(_fetcher)) { _trolley.Park(false); Spawn_(now); return; }
 
                     Push_(_fetcher, now - _fetchAt);
 
                     var there = Motion.FlatDistance(_fetcher.Position, _parkStop) < 0.5f;
 
-                    if (!there && now - _fetchAt < FetchWalkMs && !Stalled(now)) return;
+                    if (!there && now - _fetchAt < FetchWalkMs)
+                    {
+                        if (!Stalled(now)) return;
+
+                        if (_fetchTries < FetchTries)
+                        {
+                            _fetchTries++;
+                            Log.Info("He has stopped with the trolley; asked again (" + _fetchTries + ").");
+                            Send_(_parkStop, _parkHeading, 1f, now);
+                            return;
+                        }
+                    }
 
                     Anim.Stop(_fetcher, Anim.PushDict, Anim.PushClip);
 
@@ -2006,7 +2221,12 @@ namespace CodeThree.Scene
                     // is a fact, and the drag, the foot end and the lift all go by the fact.
                     _park = _trolley.Where;
 
-                    _trolley.Park(!_dragLane);
+                    // NEVER SOLID WHILE IT STANDS. A solid trolley is not on the navmesh, so a
+                    // man sent past it walks into it and stops: the medic was cast into the
+                    // lift nearly a metre from his mark with it standing in his way. People
+                    // walk through it on their way to their marks; it is a trolley at a scene,
+                    // not a wall.
+                    _trolley.Park(false);
 
                     if (!_dragLane)
                     {
@@ -2052,6 +2272,18 @@ namespace CodeThree.Scene
             }
         }
 
+        /// <summary>The fetch walk, issued, with the stall clock restarted.</summary>
+        private void Send_(Vector3 to, float heading, float speed, int now)
+        {
+            if (!Crew.Alive(_fetcher)) return;
+
+            Crew.WalkTo(_fetcher, to, heading, speed, FetchWalkMs);
+
+            _fetchSent = true;
+            _fetchLast = _fetcher.Position;
+            _fetchLastAt = now;
+        }
+
         /// <summary>Whether the fetcher has gone nowhere for long enough to be called stuck.</summary>
         private bool Stalled(int now)
         {
@@ -2090,7 +2322,7 @@ namespace CodeThree.Scene
             }
             else
             {
-                _trolley.Park(!_dragLane);
+                _trolley.Park(false);
                 if (_dragLane) _trolley.Lower(1f);
             }
 
@@ -2138,8 +2370,22 @@ namespace CodeThree.Scene
 
                     if (!_dragLane)
                     {
-                        Log.Info("The lane beyond his head is " + (hit.DidHit ? "blocked" : "not level") +
-                                 "; he goes onto a standing trolley beside him instead.");
+                        // SAYING WHAT IT HIT, because a lane called blocked by the ambulance
+                        // itself, or by the medic's bag, is a lane that is not blocked.
+                        var what = "not level";
+
+                        if (hit.DidHit)
+                        {
+                            var thing = hit.HitEntity;
+                            var kind = thing == null || !thing.Exists() ? "the map"
+                                     : thing is Vehicle ? (Crew.Alive(_van) && thing.Handle == _van.Handle ? "the ambulance" : "a vehicle")
+                                     : thing is Ped ? "a ped"
+                                     : "a prop (" + thing.Model.Hash + ")";
+
+                            what = "blocked by " + kind + " " + Motion.FlatDistance(from, hit.HitPosition).ToString("0.0") + "m out";
+                        }
+
+                        Log.Info("The lane beyond his head is " + what + "; he goes onto a standing trolley beside him instead.");
                     }
                 }
             }
@@ -2591,7 +2837,18 @@ namespace CodeThree.Scene
                     if (_trolley.Over(pelvis))
                     {
                         _settlePelvis = pelvis;
-                        _settleHeading = _body.Heading;
+                        _settleLying = Crew.Lying(_body);
+
+                        // OUT OF THE PUT-DOWN'S LAST FRAME AND INTO THE LYING CLIP, as he is
+                        // attached. A ped held in a scene and attached to a trolley is placed
+                        // by two things, and when the trolley rises the scene would argue.
+                        // The lying clip is played from his own root, which the drag set keeps
+                        // about where the morgue set does; whatever the change of clip shifts
+                        // him by, Resettle measures a moment later and takes back out.
+                        if (!Anim.Play(_body, Anim.DeadDict, Anim.DeadPose, Anim.Hold, -1, 2f))
+                        {
+                            Anim.Play(_body, Anim.DeadFallbackDict, Anim.DeadFallbackPose, Anim.Hold, -1, 2f);
+                        }
 
                         if (_trolley.Settle(_body))
                         {
@@ -2679,10 +2936,30 @@ namespace CodeThree.Scene
             // A QUARTER OF A SECOND ON, HE IS MEASURED AND SQUARED. His skeleton needs a few
             // frames to take up the lying pose after the attach; read too soon it is half the
             // carried pose, and the correction would be wrong for the whole session.
+            //
+            // AND KEPT AT UNTIL IT TAKES. The measurement needs him lying; the one time he was
+            // not -- another script had stood him up on the canvas -- it quietly measured
+            // nothing and he rode to the hospital across the trolley. It is tried every tick
+            // for two seconds, with the lying clip put back on him if it has come off.
             if (!_squared && now - _laidAt >= 250)
             {
-                _squared = true;
-                _trolley.Square(_body);
+                if (_trolley.Square(_body))
+                {
+                    _squared = true;
+                }
+                else if (now - _laidAt > 2000)
+                {
+                    _squared = true;
+                    Log.Warn("He could not be measured on the canvas; left as the ini has him.");
+                }
+                else if (!Anim.IsPlaying(_body, Anim.DeadDict, Anim.DeadPose) &&
+                         !Anim.IsPlaying(_body, Anim.DeadFallbackDict, Anim.DeadFallbackPose))
+                {
+                    if (!Anim.Play(_body, Anim.DeadDict, Anim.DeadPose, Anim.Hold, -1, 4f))
+                    {
+                        Anim.Play(_body, Anim.DeadFallbackDict, Anim.DeadFallbackPose, Anim.Hold, -1, 4f);
+                    }
+                }
             }
 
             if (now - _laidAt < SettleMs) return;
@@ -2705,11 +2982,12 @@ namespace CodeThree.Scene
         /// </summary>
         private void Raise_(int now)
         {
-            // A tick after the attach: whatever it moved him by, taken back out. See Resettle.
-            if (!_resettled && now - _laidAt >= 60)
+            // Once the lying clip has blended in: whatever the attach and the change of clip
+            // moved him by, taken back out. See Resettle.
+            if (!_resettled && now - _laidAt >= 650)
             {
                 _resettled = true;
-                _trolley.Resettle(_settlePelvis, _settleHeading);
+                _trolley.Resettle(_settlePelvis, _settleLying);
             }
 
             if (!_raising)

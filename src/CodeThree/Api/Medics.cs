@@ -30,7 +30,8 @@ namespace CodeThree.Api
         /// The contract version. Bumped when a signature here changes in a way that breaks.
         /// Read by the caller BEFORE anything else.
         /// </summary>
-        public static int ApiVersion => 1;
+        /// <summary>2 added IsPatient. Everything from 1 is unchanged.</summary>
+        public static int ApiVersion => 2;
 
         /// <summary>Code Three's own version string, for the other side's log.</summary>
         public static string Version
@@ -42,15 +43,33 @@ namespace CodeThree.Api
         private static Func<bool> _running;
         private static Func<float[]> _at;
         private static Func<float[], bool> _still;
+        private static Func<int, bool> _patient;
 
         /// <summary>Called by Main once these exist. Not for outside use.</summary>
         internal static void Wire(Func<bool> owns, Func<bool> running,
-                                 Func<float[]> at, Func<float[], bool> still)
+                                 Func<float[]> at, Func<float[], bool> still,
+                                 Func<int, bool> patient)
         {
             _owns = owns;
             _running = running;
             _at = at;
             _still = still;
+            _patient = patient;
+        }
+
+        /// <summary>
+        /// Whether a ped, by handle, is the man a Code Three crew are working on right now.
+        ///
+        /// FOR ANY MOD THAT GIVES PEDESTRIANS THINGS TO DO. A patient has been brought back
+        /// from the dead and is being held in a scene; a script that clears his tasks and sends
+        /// him on his way -- as one on this machine did, mid-CPR, because it had chatted to him
+        /// before he died -- stands a corpse up and walks it away from the paramedics. Ask this
+        /// first, late-bound by name like the rest, and leave him alone while it is true.
+        /// </summary>
+        public static bool IsPatient(int handle)
+        {
+            try { return _patient != null && _patient(handle); }
+            catch { return false; }
         }
 
         internal static void Unwire()
@@ -59,6 +78,7 @@ namespace CodeThree.Api
             _running = null;
             _at = null;
             _still = null;
+            _patient = null;
         }
 
         /// <summary>Whether Code Three is here AND has finished starting up.</summary>
